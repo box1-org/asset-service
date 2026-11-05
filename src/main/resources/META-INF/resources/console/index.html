@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>box1 Operations · Asset telemetry console</title>
+  <link rel="stylesheet" href="console.css">
+  <script src="console.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to controls</a>
+  <header class="masthead">
+    <div class="brand">
+      <span class="brand-mark" id="brand-mark" aria-hidden="true"></span>
+      <span class="wordmark">BOX1 <span class="sep">/</span> OPERATIONS</span>
+      <span class="product">Asset telemetry · load and chaos console</span>
+    </div>
+    <div class="session">
+      <span>Signed in as <strong id="actor">unknown</strong></span>
+      <a href="/console/logout">Sign out</a>
+    </div>
+  </header>
+
+  <section class="banner" id="banner" aria-labelledby="banner-title">
+    <h2 id="banner-title" class="visually-hidden">Environment</h2>
+    <dl class="banner-grid">
+      <div><dt>Namespace</dt><dd id="namespace">unknown</dd></div>
+      <div><dt>Environment</dt><dd id="environment">unknown</dd></div>
+      <div><dt>Chaos gate</dt><dd id="gate">unknown</dd></div>
+      <div><dt>Backend state</dt><dd id="confirmed">unknown</dd></div>
+    </dl>
+    <p class="gate-detail" id="gate-detail"></p>
+    <button type="button" class="stop-all" id="stop-all">Stop all runs</button>
+  </section>
+
+  <main id="main" tabindex="-1">
+    <section aria-labelledby="readouts-title" class="panel readouts">
+      <h2 id="readouts-title">Live readouts <span class="hint">from this service's own metrics, ~10 s window</span></h2>
+      <dl class="readout-grid">
+        <div><dt>Admitted / s</dt><dd id="r-admitted">unknown</dd></div>
+        <div><dt>Published / s</dt><dd id="r-published">unknown</dd></div>
+        <div><dt>Rejected / s</dt><dd id="r-rejected">unknown</dd></div>
+        <div><dt>Active alerts</dt><dd id="r-alerts">unknown</dd></div>
+        <div><dt>Stale assets</dt><dd id="r-stale">unknown</dd></div>
+        <div><dt>Consumer lag</dt><dd id="r-lag">unknown</dd></div>
+        <div><dt>Producer queue</dt><dd id="r-queue">unknown</dd></div>
+        <div><dt>Producer</dt><dd id="r-producer">unknown</dd></div>
+      </dl>
+    </section>
+
+    <div class="columns">
+      <section aria-labelledby="configure-title" class="panel">
+        <h2 id="configure-title">1 · Configure</h2>
+        <form id="run-form" novalidate>
+          <fieldset>
+            <legend>Run kind</legend>
+            <label><input type="radio" name="kind" value="LOAD" checked> Load only</label>
+            <label><input type="radio" name="kind" value="CHAOS"> Load with random chaos</label>
+          </fieldset>
+          <div class="field-grid">
+            <label for="sites">Sites</label>
+            <input id="sites" name="sites" type="number" inputmode="numeric" min="1" value="2" required>
+            <label for="assets">Assets per site</label>
+            <input id="assets" name="assetsPerSite" type="number" inputmode="numeric" min="1" value="3" required>
+            <label for="rate">Readings per asset per second</label>
+            <input id="rate" name="ratePerAsset" type="number" inputmode="numeric" min="1" value="1" required>
+            <label for="duration">Duration (seconds)</label>
+            <input id="duration" name="durationSeconds" type="number" inputmode="numeric" min="10" value="120" required>
+            <label for="seed">Seed <span class="hint">16 hex characters; empty for a new one</span></label>
+            <input id="seed" name="seed" type="text" pattern="[0-9a-f]{16}" maxlength="16" autocomplete="off" spellcheck="false">
+          </div>
+          <fieldset id="metrics">
+            <legend>Metrics</legend>
+          </fieldset>
+          <p class="computed" id="computed" aria-live="polite"></p>
+          <p class="limits" id="limits"></p>
+          <div class="actions">
+            <button type="button" id="preview">Preview sequence</button>
+            <button type="submit" id="arm" class="primary">Arm run</button>
+          </div>
+        </form>
+      </section>
+
+      <section aria-labelledby="confirm-title" class="panel" id="confirm-panel">
+        <h2 id="confirm-title">2 · Confirm</h2>
+        <p id="confirm-empty">Nothing is armed. Arming reserves a run for a short window; nothing is sent until you confirm.</p>
+        <div id="confirm-armed" hidden>
+          <dl class="kv">
+            <div><dt>Run</dt><dd id="armed-id"></dd></div>
+            <div><dt>Kind</dt><dd id="armed-kind"></dd></div>
+            <div><dt>Seed</dt><dd id="armed-seed"></dd></div>
+            <div><dt>Rate</dt><dd id="armed-rate"></dd></div>
+            <div><dt>Arm expires in</dt><dd id="armed-countdown"></dd></div>
+          </dl>
+          <label for="confirm-ns">Type the namespace <strong id="confirm-ns-name"></strong> to start</label>
+          <input id="confirm-ns" type="text" autocomplete="off" spellcheck="false">
+          <div class="actions">
+            <button type="button" id="start" class="primary" disabled>Start run</button>
+            <button type="button" id="disarm">Disarm</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section aria-labelledby="active-title" class="panel">
+      <h2 id="active-title">3 · Open runs</h2>
+      <table>
+        <caption class="visually-hidden">Armed and running runs, with time remaining and stop controls</caption>
+        <thead><tr><th scope="col">Run</th><th scope="col">Kind</th><th scope="col">State</th><th scope="col">Seed</th>
+          <th scope="col">Ends in</th><th scope="col">TTL</th><th scope="col">Sent / rejected</th><th scope="col">Chaos now</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody id="open-runs"><tr><td colspan="9">unknown</td></tr></tbody>
+      </table>
+    </section>
+
+    <div class="columns">
+      <section aria-labelledby="recent-title" class="panel">
+        <h2 id="recent-title">Recent runs</h2>
+        <table>
+          <caption class="visually-hidden">The last 25 runs</caption>
+          <thead><tr><th scope="col">Run</th><th scope="col">Kind</th><th scope="col">Final state</th><th scope="col">Seed</th><th scope="col">Sequence digest</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <tbody id="recent-runs"></tbody>
+        </table>
+      </section>
+      <section aria-labelledby="audit-title" class="panel">
+        <h2 id="audit-title">Audit</h2>
+        <table>
+          <caption class="visually-hidden">The latest audit entries, newest first</caption>
+          <thead><tr><th scope="col">Time</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Run</th><th scope="col">Detail</th></tr></thead>
+          <tbody id="audit"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <section aria-labelledby="preview-title" class="panel" id="preview-panel" hidden>
+      <h2 id="preview-title">Sequence preview</h2>
+      <p id="preview-digest"></p>
+      <pre id="preview-lines" tabindex="0"></pre>
+    </section>
+  </main>
+
+  <div class="toast" id="message" role="status" aria-live="polite"></div>
+  <dialog id="stop-dialog" aria-labelledby="stop-dialog-title">
+    <h2 id="stop-dialog-title">Stop every run?</h2>
+    <p>This stops all armed and running load and chaos runs and resumes the producer. Data is kept.</p>
+    <div class="actions">
+      <button type="button" id="stop-confirm" class="primary">Stop all</button>
+      <button type="button" id="stop-cancel">Cancel</button>
+    </div>
+  </dialog>
+  <footer class="footer">Legacy yet modern: retain what works, make change deliberate. Every limit shown here is enforced by the service.</footer>
+</body>
+</html>
