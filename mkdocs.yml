@@ -2,5 +2,7 @@ site_name: asset-service
 site_description: "Represent connected industrial equipment at multiple sites."
 nav:
   - Home: index.md
+  - Architecture: architecture.md
+  - Runbook: runbook.md
 plugins:
   - techdocs-core

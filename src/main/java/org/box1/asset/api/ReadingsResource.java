@@ -28,8 +28,16 @@ import org.box1.asset.ingest.Source;
 import org.box1.asset.store.ReadingView;
 import org.box1.asset.store.TelemetryStore;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SecuritySchemeType;
+import org.eclipse.microprofile.openapi.annotations.security.SecurityScheme;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.security.SecurityRequirement;
 
+@SecurityScheme(securitySchemeName = "bearer", type = SecuritySchemeType.HTTP, scheme = "bearer", bearerFormat = "JWT")
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 public class ReadingsResource {
@@ -52,7 +60,18 @@ public class ReadingsResource {
     @RolesAllowed("telemetry-writer")
     @SecurityRequirement(name = "bearer", scopes = "telemetry-writer")
     @Operation(summary = "Ingest one reading; 202 after Kafka acknowledges it. Retrying a 503 is safe.")
-    public Response ingest(byte[] body, @HeaderParam("X-Correlation-ID") String correlationId) {
+    @RequestBody(required = true, content = @Content(mediaType = MediaType.APPLICATION_JSON,
+            schema = @Schema(implementation = ApiDocumentation.ReadingInput.class)))
+    @APIResponse(responseCode = "202", description = "Published to Kafka",
+            content = @Content(schema = @Schema(implementation = ApiDocumentation.Accepted.class)))
+    @APIResponse(responseCode = "400", description = "Invalid reading; code names the rule", content = @Content(mediaType = Problem.MEDIA_TYPE))
+    @APIResponse(responseCode = "401", description = "No valid token")
+    @APIResponse(responseCode = "403", description = "Token lacks telemetry-writer")
+    @APIResponse(responseCode = "413", description = "Body over 4 KiB", content = @Content(mediaType = Problem.MEDIA_TYPE))
+    @APIResponse(responseCode = "429", description = "Shared rate limit; see Retry-After", content = @Content(mediaType = Problem.MEDIA_TYPE))
+    @APIResponse(responseCode = "503", description = "Backpressure or not acknowledged; retrying is safe",
+            content = @Content(mediaType = Problem.MEDIA_TYPE))
+    public Response ingest(@Parameter(hidden = true) byte[] body, @HeaderParam("X-Correlation-ID") String correlationId) {
         String correlation = correlationId != null && correlationId.matches("[A-Za-z0-9:_.-]{1,128}") ? correlationId : null;
         IngestionPipeline.Submission submission = pipeline.submitRaw(body, Source.API, correlation);
         try {
