@@ -1,0 +1,6 @@
+site_name: asset-service
+site_description: "Represent connected industrial equipment at multiple sites."
+nav:
+  - Home: index.md
+plugins:
+  - techdocs-core
