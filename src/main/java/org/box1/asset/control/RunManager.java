@@ -63,6 +63,8 @@ public class RunManager {
     private final Object lifecycle = new Object();
     private volatile String pausedBy;
     private volatile long heartbeatFailingSinceNanos;
+    /** Last time every local run's heartbeat reached the database; checked by each tick without touching the database. */
+    private volatile long lastHeartbeatOkNanos = System.nanoTime();
 
     public RunManager(RunStore runs, RunTransitions transitions, ChaosGate gate, MetricCatalog catalog, IngestionPipeline pipeline,
             ReadingPublisher publisher, AssetConfig config, MeterRegistry registry, Tracer tracer) {
@@ -209,6 +211,9 @@ public class RunManager {
                 LOG.warnf("Heartbeat for %s failed (%s)", run.runId, error.getMessage());
             }
         }
+        if (!failed) {
+            lastHeartbeatOkNanos = System.nanoTime();
+        }
         failSafe(failed);
     }
 
@@ -270,6 +275,13 @@ public class RunManager {
 
     private void tick(ActiveRun run) {
         try {
+            // A hung database call can stop the heartbeat itself, so the tick enforces the fail-safe without the database.
+            if (System.nanoTime() - Math.max(lastHeartbeatOkNanos, run.startedNanos) > config.control().staleHeartbeat().toNanos()) {
+                LOG.errorf("No successful heartbeat for over %s; stopping run %s locally as a fail-safe", config.control().staleHeartbeat(),
+                        run.runId);
+                stopLocally(run);
+                return;
+            }
             long elapsed = (System.nanoTime() - run.startedNanos) / 1_000_000;
             if (elapsed >= run.config.durationSeconds() * 1000L) {
                 end(run, "COMPLETED", "duration reached", "system", "COMPLETE");
