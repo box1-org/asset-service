@@ -62,6 +62,29 @@ class SecurityTest {
     }
 
     @Test
+    void theOperationsConsoleMayReadWithTheReaderRoleAndNothingElse() {
+        // box1-docs#80: tokens issued to operations-console keep only telemetry-reader.
+        String reader = Tokens.issuedTo("operations-console", "olivia", "telemetry-reader");
+        given().auth().oauth2(reader).get("/api/v1/alerts?status=ACTIVE&limit=1").then().statusCode(200);
+        given().auth().oauth2(reader).get("/api/v1/assets/asset_a/readings").then().statusCode(200);
+        given().auth().oauth2(reader).contentType(ContentType.JSON).body(READING).post("/api/v1/telemetry/readings").then()
+                .statusCode(403);
+
+        String everything = Tokens.issuedTo("operations-console", "olivia", "telemetry-writer", "chaos-operator");
+        given().auth().oauth2(everything).get("/api/v1/alerts").then().statusCode(403);
+        given().auth().oauth2(everything).contentType(ContentType.JSON).body(READING).post("/api/v1/telemetry/readings").then()
+                .statusCode(403);
+        given().redirects().follow(false).auth().oauth2(everything).get("/api/v1/control/state").then().statusCode(not(200));
+    }
+
+    @Test
+    void anyOtherClientOrNoClientIsRefusedEvenWithTheReaderRole() {
+        given().auth().oauth2(Tokens.issuedTo("openshell-cli", "eve", "telemetry-reader")).get("/api/v1/alerts").then().statusCode(401);
+        given().auth().oauth2(Tokens.issuedTo("developer-hub", "eve", "telemetry-reader")).get("/api/v1/alerts").then().statusCode(401);
+        given().auth().oauth2(Tokens.issuedTo(null, "eve", "telemetry-reader")).get("/api/v1/alerts").then().statusCode(401);
+    }
+
+    @Test
     void consoleResponsesCarryBrowserHardeningHeaders() {
         given().get("/signed-out.html").then().statusCode(200).header("X-Frame-Options", "DENY")
                 .header("Content-Security-Policy", containsString("frame-ancestors 'none'")).header("X-Content-Type-Options", "nosniff");
