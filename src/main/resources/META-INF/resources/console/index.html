@@ -104,30 +104,36 @@
 
     <section aria-labelledby="active-title" class="panel">
       <h2 id="active-title">3 · Open runs</h2>
-      <table>
+      <div class="table-scroll" tabindex="0" role="region" aria-labelledby="active-title">
+        <table>
         <caption class="visually-hidden">Armed and running runs, with time remaining and stop controls</caption>
         <thead><tr><th scope="col">Run</th><th scope="col">Kind</th><th scope="col">State</th><th scope="col">Seed</th>
           <th scope="col">Ends in</th><th scope="col">TTL</th><th scope="col">Sent / rejected</th><th scope="col">Chaos now</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody id="open-runs"><tr><td colspan="9">unknown</td></tr></tbody>
       </table>
+        </div>
     </section>
 
-    <div class="columns">
+    <div class="stack">
       <section aria-labelledby="recent-title" class="panel">
         <h2 id="recent-title">Recent runs</h2>
+        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="recent-title">
         <table>
           <caption class="visually-hidden">The last 25 runs</caption>
           <thead><tr><th scope="col">Run</th><th scope="col">Kind</th><th scope="col">Final state</th><th scope="col">Seed</th><th scope="col">Sequence digest</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
           <tbody id="recent-runs"></tbody>
         </table>
+        </div>
       </section>
       <section aria-labelledby="audit-title" class="panel">
         <h2 id="audit-title">Audit</h2>
+        <div class="table-scroll" tabindex="0" role="region" aria-labelledby="audit-title">
         <table>
           <caption class="visually-hidden">The latest audit entries, newest first</caption>
           <thead><tr><th scope="col">Time</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Run</th><th scope="col">Detail</th></tr></thead>
           <tbody id="audit"></tbody>
         </table>
+        </div>
       </section>
     </div>
 

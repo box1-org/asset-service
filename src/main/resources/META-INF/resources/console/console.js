@@ -131,7 +131,7 @@
       const actions = document.createElement('td');
       actions.append(button('Stop', `Stop run ${run.runId}`, () => stopRun(run.runId)));
       return row([
-        cell(run.runId, 'mono'), cell(run.kind), cell(unconfirmed ? 'RUNNING? (no heartbeat)' : run.state),
+        cell(run.runId, 'mono'), cell(run.kind, 'nowrap'), cell(unconfirmed ? 'RUNNING? (no heartbeat)' : run.state),
         cell(run.seed, 'mono'), cell(run.state === 'RUNNING' ? until(run.deadline) : `arm ${until(run.armedUntil)}`),
         cell(run.state === 'RUNNING' ? until(run.ttlAt) : '—'), cell(`${run.emitted} / ${run.rejected}`),
         cell(run.currentInjection ?? (run.executingHere ? 'none' : 'not visible from this pod')), actions]);
@@ -143,12 +143,12 @@
       const [runs, audit] = await Promise.all([api('/runs'), api('/audit?limit=20')]);
       $('recent-runs').replaceChildren(...runs.filter((r) => r.state !== 'ARMED' && r.state !== 'RUNNING').map((run) => {
         const actions = document.createElement('td');
-        actions.append(button('Replay seed', `Replay run ${run.runId} with seed ${run.seed}`, () => replay(run)));
-        return row([cell(run.runId, 'mono'), cell(run.kind), cell(`${run.state}${run.stopReason ? ': ' + run.stopReason : ''}`),
-          cell(run.seed, 'mono'), cell(run.sequenceDigest, 'mono'), actions]);
+        actions.append(button('Replay seed', `Replay seed ${run.seed} from run ${run.runId}`, () => replay(run)));
+        return row([cell(run.runId, 'mono'), cell(run.kind, 'nowrap'), cell(`${run.state}${run.stopReason ? ': ' + run.stopReason : ''}`),
+          cell(run.seed, 'mono'), cell(run.sequenceDigest, 'mono wrap'), actions]);
       }));
-      $('audit').replaceChildren(...audit.map((a) => row([cell(time(a.at), 'mono'), cell(a.actor), cell(a.action),
-        cell(a.runId, 'mono'), cell(a.detail, 'mono')])));
+      $('audit').replaceChildren(...audit.map((a) => row([cell(time(a.at), 'mono'), cell(a.actor, 'nowrap'), cell(a.action, 'nowrap'),
+        cell(a.runId, 'mono'), cell(a.detail, 'mono wrap')])));
     } catch (error) {
       $('audit').replaceChildren(row([cell('unknown: audit could not be read', 'unknown', 5)]));
     }

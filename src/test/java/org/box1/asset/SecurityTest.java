@@ -30,6 +30,15 @@ class SecurityTest {
     }
 
     @Test
+    void aConsoleSessionCookieNeverAuthenticatesTheBearerOnlyApi() {
+        for (String cookie : new String[] {"q_session_console=abc", "q_auth_console_x=abc", "q_session_console_chunk_1=abc"}) {
+            given().redirects().follow(false).header("Cookie", cookie).get("/api/v1/alerts").then().statusCode(401);
+            given().redirects().follow(false).header("Cookie", cookie).contentType(ContentType.JSON).body(READING)
+                    .post("/api/v1/telemetry/readings").then().statusCode(401);
+        }
+    }
+
+    @Test
     void ingestionNeedsTheWriterRoleFromThisClientsClaim() {
         given().auth().oauth2(Tokens.clientRoles("alice")).contentType(ContentType.JSON).body(READING)
                 .post("/api/v1/telemetry/readings").then().statusCode(403);

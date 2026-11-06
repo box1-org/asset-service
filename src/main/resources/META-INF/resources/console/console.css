@@ -49,6 +49,7 @@ a { color: var(--text); }
 main { padding: 1rem 1.5rem 2rem; display: grid; gap: 1rem; }
 main:focus { outline: none; }
 .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1rem; }
+.stack { display: grid; gap: 1rem; }
 .panel { background: var(--panel); border: 1px solid var(--line); padding: 1rem 1.25rem; min-width: 0; }
 h2 { margin: 0 0 .75rem; font-size: .8rem; letter-spacing: .16em; text-transform: uppercase; }
 
@@ -57,9 +58,9 @@ h2 { margin: 0 0 .75rem; font-size: .8rem; letter-spacing: .16em; text-transform
 .readout-grid dd { margin: .1rem 0 0; font: 600 1.25rem/1.2 var(--mono); }
 dd.unknown, td.unknown { color: var(--muted); font-style: italic; }
 
-fieldset { border: 1px solid var(--line); margin: 0 0 .75rem; padding: .5rem .75rem; }
+fieldset { border: 1px solid var(--line); margin: 0 0 .75rem; padding: .5rem .75rem; min-width: 0; }
 legend { color: var(--muted); font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; padding: 0 .25rem; }
-fieldset label { margin-right: 1.25rem; white-space: nowrap; }
+fieldset label { display: inline-block; margin-right: 1.25rem; white-space: nowrap; }
 .field-grid { display: grid; grid-template-columns: minmax(12rem, auto) 1fr; gap: .45rem .75rem; align-items: center; margin-bottom: .75rem; }
 input[type="number"], input[type="text"] { width: 100%; max-width: 16rem; padding: .4rem .5rem; color: var(--text);
   background: var(--charcoal); border: 1px solid var(--steel); font: 1rem var(--mono); }
@@ -83,11 +84,17 @@ button.primary:disabled { background: var(--raised); color: var(--muted); border
 #confirm-armed label { display: block; margin-bottom: .35rem; }
 #confirm-armed input { margin-bottom: .75rem; }
 
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+/* Wide tables scroll inside a focusable region instead of widening or crushing the page. */
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.table-scroll:focus-visible { outline-offset: -2px; }
+table { min-width: 36rem; width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { text-align: left; color: var(--muted); font-weight: 600; font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
   border-bottom: 1px solid var(--line); padding: .35rem .5rem; }
 td { border-bottom: 1px solid rgba(67,74,80,.6); padding: .35rem .5rem; vertical-align: top; overflow-wrap: anywhere; }
-td.mono { font-family: var(--mono); font-size: .85rem; }
+td.mono { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
+td.mono.wrap { white-space: normal; }
+td.nowrap { white-space: nowrap; }
+td button, .actions button { white-space: nowrap; }
 td button { padding: .25rem .6rem; font-size: .75rem; }
 pre { margin: 0; max-height: 18rem; overflow: auto; font: .8rem/1.4 var(--mono); color: var(--muted); }
 
@@ -104,6 +111,9 @@ dialog::backdrop { background: rgba(10,12,14,.7); }
   .field-grid { grid-template-columns: 1fr; }
   .columns { grid-template-columns: 1fr; }
   table { font-size: .8rem; }
+  .masthead, .banner, main, .footer { padding-left: .75rem; padding-right: .75rem; }
+  input[type="number"], input[type="text"] { max-width: 100%; }
+  .session { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
