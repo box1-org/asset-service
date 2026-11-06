@@ -4,23 +4,52 @@ Represent connected industrial equipment at multiple sites.
 
 Owner: `user:default/mike`. Quarkus 3.40.1.1, Java 21, Maven 3.9.16.
 
-Optional integrations selected at creation: PostgreSQL = `false`, Kafka = `true`.
-The integrations add their Quarkus extensions and GitOps resources. PostgreSQL creates a
-service-owned Deployment, Service, PVC, and Secret placeholder; replace its password before
-syncing. Kafka uses the separately managed shared `box1-kafka` Strimzi cluster; service
-onboarding does not create a `KafkaTopic`. The broker address is
-`box1-kafka-kafka-bootstrap.box1-kafka.svc:9092`.
+This is the box1 **Telemetry** service ([box1-docs#15](https://github.com/box1-org/box1-docs/issues/15)).
+It ingests sensor readings from equipment at several sites, keeps recent readings in its own
+PostgreSQL database, raises threshold alerts with hysteresis, and publishes
+`equipment.reading.v1` and `equipment.threshold-exceeded.v1` on `box1.telemetry.events.v1`.
+It also serves a **load and chaos console** at `/console/` that generates seeded telemetry load
+and bounded, telemetry-only disruption.
+
+| Read | For |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Data flow, ownership, alert rules, the console's safety model |
+| [docs/runbook.md](docs/runbook.md) | First deployment, configuration, operations, recovery and replay |
+| [box1-ops-contracts TELEMETRY.md](https://github.com/box1-org/box1-ops-contracts/blob/main/TELEMETRY.md) | Event contract, keying and dead letters |
+
+Onboarded with PostgreSQL = `false`, Kafka = `true`. PostgreSQL was added afterwards without
+the template's inline Secret: the Secret is provisioned out of band (see the runbook). Kafka
+uses the shared `box1-kafka` cluster at `box1-kafka-kafka-bootstrap.box1-kafka.svc:9092`; the
+topics are managed in `box1-gitops/platform/kafka/topics/`.
+
+## API
+
+| Path | Access | Purpose |
+|---|---|---|
+| `POST /api/v1/telemetry/readings` | bearer token, client role `telemetry-writer` | Ingest one reading; `202` after Kafka acknowledges |
+| `GET /api/v1/assets/{assetId}/readings` | bearer token, role `telemetry-reader`, `telemetry-writer` or `chaos-operator` | Time window, keyset pagination, ordered by `measuredAt`, `metricName` |
+| `GET /api/v1/alerts` | as above | Alert episodes, newest first |
+| `/console/`, `/api/v1/control/*` | Keycloak login, client role `chaos-operator` | Load and chaos console |
+| `/api/greetings`, `/api/info`, `/q/*` | anonymous | Golden Path smoke contract, unchanged |
+
+Errors are `application/problem+json` with a stable `code`. Tokens come from realm `box1`;
+roles are read only from `resource_access.asset-service.roles`.
 
 ## Local development
 
 Install JDK 21 and use the included Maven wrapper:
 
 ```sh
-./mvnw quarkus:dev
-./mvnw verify -DskipITs=false -Dgit.ref="$(git rev-parse HEAD)"
-curl http://localhost:8080/api/greetings?name=Ada
-curl http://localhost:8080/api/info
+./mvnw verify                      # unit, security and contract tests; no database or broker needed
+./mvnw verify -Pcontainers         # adds the PostgreSQL and Kafka suite
 ```
+
+The containers suite expects PostgreSQL on `localhost:15432` (database and user
+`asset_service`) and Kafka on `localhost:19092` with topics `box1.telemetry.events.v1` and
+`box1.telemetry.dlq.v1`; override with `TEST_DATABASE_URL`, `TEST_DATABASE_USERNAME`,
+`TEST_DATABASE_PASSWORD` and `TEST_KAFKA`. The contract tests fetch schemas from
+`box1-ops-contracts` at the commit pinned by `contracts.ref` in `pom.xml`, so they need
+network access to GitHub.
 
 Verification runs unit tests, HTTP tests, packaged JVM integration tests,
 Checkstyle, and SpotBugs/FindSecBugs. `/api/info` includes the immutable Git SHA
