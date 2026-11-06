@@ -92,6 +92,17 @@ class SecurityTest {
     }
 
     @Test
+    void theConsolesOwnHttpsOriginIsNotRejectedBehindTheEdgeButOthersAre() {
+        // A browser POST from the console carries Origin https://<route> while the pod sees http behind the edge Route.
+        int own = given().redirects().follow(false).header("Origin", "https://asset-service-dev.apps.ocp.box1.org")
+                .header("X-Requested-With", "JavaScript").header("X-Box1-Console", "1").contentType(ContentType.JSON).body("{}")
+                .post("/api/v1/control/stop-all").then().extract().statusCode();
+        org.junit.jupiter.api.Assertions.assertEquals(499, own, "reaches authentication, not rejected by CORS");
+        given().redirects().follow(false).header("Origin", "https://evil.example").header("X-Box1-Console", "1")
+                .contentType(ContentType.JSON).body("{}").post("/api/v1/control/stop-all").then().statusCode(403);
+    }
+
+    @Test
     void everythingUnlistedIsDenied() {
         given().redirects().follow(false).get("/").then().statusCode(not(equalTo(200)));
         given().redirects().follow(false).get("/internal").then().statusCode(not(equalTo(200)));
