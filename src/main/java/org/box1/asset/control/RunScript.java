@@ -154,10 +154,15 @@ public final class RunScript implements Iterator<Emission> {
         add(Emission.reading(index, offset, fields));
     }
 
+    /** Shuffles only within whole blocks that end inside the injection, so no timestamp lands on a later tick (ARCH-6). */
     private long shuffled(long offset) {
         int block = outOfOrder.length;
         long position = (offset - current.startMillis()) / tickMillis;
         long blockStart = position - position % block;
+        long windowTicks = (current.endMillis() - current.startMillis()) / tickMillis;
+        if (blockStart + block > windowTicks) {
+            return offset;
+        }
         return current.startMillis() + (blockStart + outOfOrder[(int) (position % block)]) * tickMillis;
     }
 
@@ -183,7 +188,7 @@ public final class RunScript implements Iterator<Emission> {
             }
             case CLOCK_SKEW -> {
                 duration = targets.nextInt(5, 15) * 1000L;
-                long minutes = targets.nextDouble() < 0.5 ? targets.nextInt(2, 10) : -targets.nextInt(1, 30);
+                long minutes = targets.nextDouble() < 0.5 ? targets.nextInt(6, 10) : -targets.nextInt(1, 30);
                 parameters = (minutes * 60_000L) + "ms";
                 target = asset;
             }
@@ -195,7 +200,8 @@ public final class RunScript implements Iterator<Emission> {
                 target = asset;
             }
             case PRODUCER_PAUSE -> {
-                duration = Math.min(maxPauseMillis, targets.nextInt(5, 30) * 1000L);
+                // Never longer than the run has left, so a pause cannot outlive its run (review ARCH-3, MSG-7).
+                duration = Math.min(Math.min(maxPauseMillis, targets.nextInt(5, 30) * 1000L), Math.max(0, endMillis - offset));
                 parameters = duration + "ms";
                 target = "producer";
             }

@@ -45,6 +45,21 @@ public class TelemetryStore {
         }
     }
 
+    /** The stored value at a reading's natural key, if any. */
+    public Optional<Double> storedValue(Reading reading) {
+        String sql = "SELECT value FROM reading WHERE asset_id = ? AND metric_name = ? AND measured_at = ?";
+        try (Connection c = dataSource.getConnection(); PreparedStatement s = c.prepareStatement(sql)) {
+            s.setString(1, reading.assetId());
+            s.setString(2, reading.metricName());
+            s.setTimestamp(3, Timestamp.from(reading.measuredAt()));
+            try (ResultSet r = s.executeQuery()) {
+                return r.next() ? Optional.of(r.getDouble(1)) : Optional.empty();
+            }
+        } catch (SQLException error) {
+            throw new StoreException("read stored value", error);
+        }
+    }
+
     public void touchLastSeen(String assetId, String siteId) {
         String sql = "INSERT INTO asset_last_seen (asset_id, site_id, last_received_at) VALUES (?, ?, now())"
                 + " ON CONFLICT (asset_id) DO UPDATE SET site_id = EXCLUDED.site_id, last_received_at = now()";

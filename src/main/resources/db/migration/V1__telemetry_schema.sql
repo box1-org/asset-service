@@ -127,3 +127,13 @@ END;
 $$;
 CREATE TRIGGER control_audit_guard BEFORE UPDATE OR DELETE ON control_audit
     FOR EACH ROW EXECUTE FUNCTION control_audit_guard();
+
+-- TRUNCATE bypasses row triggers. This guards against application bugs, not against the owning role, which could
+-- drop the trigger; real immutability needs a separate migration owner (box1-docs#41).
+CREATE FUNCTION control_audit_no_truncate() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'control_audit cannot be truncated';
+END;
+$$;
+CREATE TRIGGER control_audit_no_truncate BEFORE TRUNCATE ON control_audit
+    FOR EACH STATEMENT EXECUTE FUNCTION control_audit_no_truncate();

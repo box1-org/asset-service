@@ -39,9 +39,19 @@ class RetentionTest {
             s.executeUpdate("INSERT INTO reading (asset_id, metric_name, measured_at, site_id, value, unit, source_event_id) VALUES"
                     + " ('asset_retention_old', 'power', now() - interval '25 hours', 'site_r', 1, 'kW', gen_random_uuid()),"
                     + " ('asset_retention_new', 'power', now() - interval '1 hour', 'site_r', 1, 'kW', gen_random_uuid())");
+            s.executeUpdate("INSERT INTO asset_last_seen (asset_id, site_id, last_received_at) VALUES ('asset_retention_gone', 'site_r',"
+                    + " now() - interval '25 hours') ON CONFLICT DO NOTHING");
             retention.run();
             assertEquals(0, count(s, "SELECT count(*) FROM reading WHERE asset_id = 'asset_retention_old'"), "older than 24 h deleted");
+            assertEquals(0, count(s, "SELECT count(*) FROM asset_last_seen WHERE asset_id = 'asset_retention_gone'"), "long-gone asset pruned");
             assertEquals(1, count(s, "SELECT count(*) FROM reading WHERE asset_id = 'asset_retention_new'"), "recent reading kept");
+        }
+    }
+
+    @Test
+    void auditTableCannotBeTruncated() throws Exception {
+        try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+            assertThrows(SQLException.class, () -> s.executeUpdate("TRUNCATE control_audit"));
         }
     }
 

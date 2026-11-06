@@ -48,9 +48,24 @@ class SecurityTest {
                 .post("/api/v1/telemetry/readings").then().statusCode(403);
         given().auth().oauth2(Tokens.otherAudience("eve", "telemetry-writer")).contentType(ContentType.JSON).body(READING)
                 .post("/api/v1/telemetry/readings").then().statusCode(401);
+        given().auth().oauth2(Tokens.otherClient("eve", "telemetry-writer")).contentType(ContentType.JSON).body(READING)
+                .post("/api/v1/telemetry/readings").then().statusCode(401);
         given().auth().oauth2(Tokens.clientRoles("writer", "telemetry-writer")).contentType(ContentType.JSON).body(READING)
                 .post("/api/v1/telemetry/readings").then().statusCode(400).contentType("application/problem+json")
                 .body("code", equalTo("INVALID_UNIT"));
+    }
+
+    @Test
+    void readsNeedATelemetryRoleNotJustARealmLogin() {
+        given().auth().oauth2(Tokens.clientRoles("anyone")).get("/api/v1/alerts").then().statusCode(403);
+        given().auth().oauth2(Tokens.clientRoles("anyone")).get("/api/v1/assets/asset_a/readings").then().statusCode(403);
+    }
+
+    @Test
+    void consoleResponsesCarryBrowserHardeningHeaders() {
+        given().get("/signed-out.html").then().statusCode(200).header("X-Frame-Options", "DENY")
+                .header("Content-Security-Policy", containsString("frame-ancestors 'none'")).header("X-Content-Type-Options", "nosniff");
+        given().redirects().follow(false).get("/console/").then().header("X-Frame-Options", "DENY");
     }
 
     @Test

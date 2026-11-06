@@ -27,8 +27,8 @@ topics are managed in `box1-gitops/platform/kafka/topics/`.
 | Path | Access | Purpose |
 |---|---|---|
 | `POST /api/v1/telemetry/readings` | bearer token, client role `telemetry-writer` | Ingest one reading; `202` after Kafka acknowledges |
-| `GET /api/v1/assets/{assetId}/readings` | bearer token | Time window, keyset pagination, ordered by `measuredAt`, `metricName` |
-| `GET /api/v1/alerts` | bearer token | Alert episodes, newest first |
+| `GET /api/v1/assets/{assetId}/readings` | bearer token, role `telemetry-reader`, `telemetry-writer` or `chaos-operator` | Time window, keyset pagination, ordered by `measuredAt`, `metricName` |
+| `GET /api/v1/alerts` | as above | Alert episodes, newest first |
 | `/console/`, `/api/v1/control/*` | Keycloak login, client role `chaos-operator` | Load and chaos console |
 | `/api/greetings`, `/api/info`, `/q/*` | anonymous | Golden Path smoke contract, unchanged |
 

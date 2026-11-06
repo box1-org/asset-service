@@ -32,6 +32,7 @@ public class IngestionPipeline {
     private final ReadingValidator validator;
     private final ReadingPublisher publisher;
     private final TokenBucket bucket;
+    private final TokenBucket runs;
     private final MeterRegistry registry;
     private final Clock clock;
     private final int maxBody;
@@ -42,6 +43,8 @@ public class IngestionPipeline {
         this.validator = validator;
         this.publisher = publisher;
         this.bucket = new TokenBucket(config.ingest().maxRatePerSecond(), System::nanoTime);
+        // Load and chaos together may use at most half the shared rate, so real API writers keep the rest (ARCH-2, SEC-7).
+        this.runs = new TokenBucket(Math.max(1, config.ingest().maxRatePerSecond() / 2), System::nanoTime);
         this.registry = registry;
         this.clock = clock;
         this.maxBody = config.ingest().maxBodyBytes();
@@ -69,6 +72,9 @@ public class IngestionPipeline {
 
     /** Field map form, used by the load generator so malformed chaos values reach the same validator. */
     public Submission submit(Map<String, ?> fields, Source source, String correlationId) {
+        if (source != Source.API && !runs.tryAcquire()) {
+            throw count(source, new RejectedReadingException(RejectReason.RATE_LIMITED, "Run share of the ingestion rate reached"));
+        }
         if (!bucket.tryAcquire()) {
             throw count(source, new RejectedReadingException(RejectReason.RATE_LIMITED,
                     "Ingestion rate limit reached; retry later"));
@@ -79,7 +85,7 @@ public class IngestionPipeline {
         } catch (RejectedReadingException rejected) {
             throw count(source, rejected);
         }
-        UUID eventId = UUID.randomUUID();
+        UUID eventId = eventId(reading);
         String traceparent = Envelopes.currentTraceparent();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("assetId", reading.assetId());
@@ -99,6 +105,16 @@ public class IngestionPipeline {
         }
         registry.counter("asset.ingest.admitted", "source", source.tag()).increment();
         return new Submission(eventId, traceparent, reading, acked);
+    }
+
+    /**
+     * The same reading always gets the same eventId, so a client retry after a 503 or a re-sent duplicate cannot look
+     * like a new event to consumers that deduplicate on eventId (review MSG-4). Name-based (RFC 4122 v3) over the
+     * natural key, not for security.
+     */
+    static UUID eventId(Reading reading) {
+        String key = "box1/equipment.reading.v1/" + reading.assetId() + "/" + reading.metricName() + "/" + reading.measuredAt();
+        return UUID.nameUUIDFromBytes(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private RejectedReadingException count(Source source, RejectedReadingException rejected) {

@@ -34,6 +34,8 @@ public class ReadingProjector {
     private final MeterRegistry registry;
     private final Clock clock;
     private final String topic;
+    private final java.time.Duration maxFuture;
+    private final java.time.Duration maxAge;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public ReadingProjector(TelemetryStore store, MetricCatalog catalog, MeterRegistry registry, Clock clock, AssetConfig config) {
@@ -42,20 +44,38 @@ public class ReadingProjector {
         this.registry = registry;
         this.clock = clock;
         this.topic = config.ingest().topic();
+        this.maxFuture = config.ingest().maxFutureSkew();
+        this.maxAge = config.retention().readings();
     }
 
     /** Returns what happened, for metrics and tests. */
     @Transactional
     public Result project(InboundReading inbound, String currentTraceparent) {
         Reading reading = inbound.reading();
+        java.time.Instant now = clock.instant();
+        if (reading.measuredAt().isBefore(now.minus(maxAge))) {
+            // Older than retention (a long outage or a replay): age retention would delete it at once. Not poison.
+            registry.counter("asset.consume.skipped", "reason", "older_than_retention").increment();
+            return Result.SKIPPED;
+        }
         if (!store.insertReading(reading, inbound.eventId(), inbound.traceparent())) {
-            registry.counter("asset.consume.duplicates").increment();
+            boolean conflict = store.storedValue(reading).map(v -> Double.compare(v, reading.value()) != 0).orElse(false);
+            registry.counter("asset.consume.duplicates", "kind", conflict ? "different_value" : "same_value").increment();
+            if (conflict) {
+                LOG.warnf("Reading %s for %s %s at %s differs from the stored value; the first value is kept", inbound.eventId(),
+                        reading.assetId(), reading.metricName(), reading.measuredAt());
+            }
             return Result.DUPLICATE;
         }
         store.touchLastSeen(reading.assetId(), reading.siteId());
+        if (reading.measuredAt().isAfter(now.plus(maxFuture))) {
+            // Never let a far-future timestamp move the evaluation watermark (review PERS-1, ARCH-1).
+            registry.counter("asset.consume.not.evaluated", "reason", "future").increment();
+            return Result.STORED_NOT_EVALUATED;
+        }
         TelemetryStore.StoredState stored = store.lockState(reading.assetId(), reading.metricName()).orElse(null);
-        if (stored != null && reading.measuredAt().isBefore(stored.lastMeasuredAt())) {
-            registry.counter("asset.consume.out.of.order").increment();
+        if (stored != null && !reading.measuredAt().isAfter(stored.lastMeasuredAt())) {
+            registry.counter("asset.consume.not.evaluated", "reason", "out_of_order").increment();
             return Result.STORED_NOT_EVALUATED;
         }
         AlertState state = stored == null ? AlertState.NONE : stored.state();
@@ -80,7 +100,9 @@ public class ReadingProjector {
         if (outcome.transition() == ThresholdEngine.Transition.ESCALATED) {
             transition("escalated", outcome.next().severity());
         }
-        store.saveState(reading.assetId(), reading.metricName(), outcome.next(), reading.measuredAt());
+        // The watermark never runs ahead of this pod's clock, so an accepted skew cannot suspend later evaluation.
+        java.time.Instant watermark = reading.measuredAt().isAfter(now) ? now : reading.measuredAt();
+        store.saveState(reading.assetId(), reading.metricName(), outcome.next(), watermark);
         return outcome.transition() == ThresholdEngine.Transition.ACTIVATED ? Result.ACTIVATED : Result.STORED;
     }
 
@@ -116,5 +138,5 @@ public class ReadingProjector {
                 severity == null ? "none" : severity.name().toLowerCase(java.util.Locale.ROOT)).increment();
     }
 
-    public enum Result { DUPLICATE, STORED, STORED_NOT_EVALUATED, ACTIVATED }
+    public enum Result { SKIPPED, DUPLICATE, STORED, STORED_NOT_EVALUATED, ACTIVATED }
 }

@@ -41,6 +41,7 @@ public class ReadingPublisher {
     private final Clock clock;
     private final Counter dropped;
     private final Counter published;
+    private final Counter shutdownDropped;
     private volatile boolean running;
     private Thread sender;
 
@@ -52,6 +53,7 @@ public class ReadingPublisher {
         this.clock = clock;
         this.dropped = registry.counter("asset.ingest.dropped", "reason", "delivery_failed");
         this.published = registry.counter("asset.ingest.published");
+        this.shutdownDropped = registry.counter("asset.ingest.dropped", "reason", "shutdown");
         registry.gauge("asset.producer.in.flight", this, ReadingPublisher::inFlight);
         registry.gauge("asset.producer.queue.capacity", this, p -> p.capacity);
         registry.gauge("asset.producer.paused", this, p -> p.isPaused() ? 1 : 0);
@@ -67,9 +69,17 @@ public class ReadingPublisher {
         if (sender != null) {
             sender.interrupt();
         }
-        int unsent = queue.size();
+        // Complete what never reached Kafka, so callers stop waiting and the loss is counted (review MSG-3).
+        int unsent = 0;
+        Pending pending;
+        while ((pending = queue.poll()) != null) {
+            permits.release();
+            shutdownDropped.increment();
+            pending.result().completeExceptionally(new IllegalStateException("shutting down"));
+            unsent++;
+        }
         if (unsent > 0) {
-            LOG.warnf("Shutdown with %d readings not yet handed to Kafka; their clients were not sent 202", unsent);
+            LOG.warnf("Shutdown with %d readings not yet handed to Kafka; counted as dropped, their clients were not sent 202", unsent);
         }
     }
 

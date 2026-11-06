@@ -44,7 +44,7 @@ Load and chaos runs (in process) ─────┤
 | Metric and unit | `temperature` (C, or F converted), `vibration` (mm/s), `pressure` (bar), `power` (kW) |
 | Value | finite and within the metric's bounds |
 | `measuredAt` | RFC 3339 UTC, at most 5 minutes in the future, not older than reading retention |
-| Rate | shared 100 readings/s across API, load and chaos (compiled maximum 200) |
+| Rate | shared 100 readings/s (compiled maximum 200); load and chaos together at most half of it, each run at most its own cap including bursts |
 
 ## Alerts
 
@@ -57,6 +57,8 @@ Per metric thresholds with site and asset overrides (`asset.threshold-overrides.
 | pressure | 8.0 | 10.0 | 7.5 |
 | power | 400 | 480 | 380 |
 
+- Readings more than 5 minutes in the future are stored but not evaluated, and the evaluation
+  watermark never runs ahead of the service's clock, so a skewed reading cannot suspend alerting.
 - An alert activates at the third reading at or above warning since the last normal reading,
   or at once at critical. Readings between the clear level and warning neither count nor reset.
 - It clears after three consecutive readings below the clear level.
@@ -78,9 +80,10 @@ The page is plain HTML, CSS and JavaScript under `src/main/resources/META-INF/re
 with no build step, no CDN and no external fonts. It calls only `/api/v1/control/*`.
 **The page enforces nothing.** It renders limits it reads from the service.
 
-- **Access.** Keycloak code flow with PKCE on the `console` OIDC tenant; client role
-  `chaos-operator`. State-changing calls need `X-Box1-Console: 1` and a JSON body, and the
-  session cookie is `SameSite=Strict`.
+- **Access.** Keycloak code flow with PKCE on the `console` OIDC tenant, chosen by path only;
+  client role `chaos-operator`; tokens must be issued to `asset-service` (`azp`). State-changing
+  calls need `X-Box1-Console: 1` and a JSON body; the session cookie is `SameSite=Strict` and
+  `Secure`; the page is served with CSP `frame-ancestors 'none'`, `X-Frame-Options: DENY` and HSTS.
 - **Deliberate change.** Arm (`POST /runs`) returns a one-time confirmation token valid for
   60 s. Start needs the token and the namespace typed exactly. Every run has a server-side rate
   cap, duration cap, TTL (duration + 30 s) and a concurrency cap of 1 (maximum 2).

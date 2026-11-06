@@ -26,6 +26,19 @@ public class RunTransitions {
         this.limits = config.control();
     }
 
+    /** Records the armed run and its ARM audit row together (review PERS-7, ARCH-9). Caps open arms (SEC-8). */
+    @Transactional(dontRollbackOn = ControlException.class)
+    public void arm(String runId, RunKind kind, String actor, String seed, String config, String namespace, long armSeconds,
+            String confirmHash, String owner, String auditDetail, int maxArmed) {
+        runs.lock();
+        if (runs.countArmed() >= maxArmed) {
+            runs.audit(null, actor, "DENIED", "{\"code\":\"ARM_CAP\"}");
+            throw new ControlException(409, "ARM_CAP", "At most " + maxArmed + " runs may be armed at once; start or disarm one");
+        }
+        runs.insertArmed(runId, kind, actor, seed, config, namespace, armSeconds, confirmHash, owner);
+        runs.audit(runId, actor, "ARM", auditDetail);
+    }
+
     /** Refusals keep their DENIED audit row: a ControlException commits what was written before it. */
     @Transactional(dontRollbackOn = ControlException.class)
     public RunRecord start(String actor, String runId, String confirmToken, String confirmNamespace, String owner, long durationSeconds,
@@ -45,13 +58,13 @@ public class RunTransitions {
             throw new ControlException(403, "CONFIRM_MISMATCH", "The confirmation token does not match this run");
         }
         if (!gate.namespace().equals(confirmNamespace)) {
-            throw new ControlException(422, "NAMESPACE_MISMATCH", "Type the namespace exactly: " + gate.namespace());
+            throw refuse(runId, actor, 422, "NAMESPACE_MISMATCH", "Type the namespace exactly: " + gate.namespace());
         }
         if (run.kind() == RunKind.CHAOS && !gate.decide().open()) {
-            throw new ControlException(403, gate.decide().code(), gate.decide().message());
+            throw refuse(runId, actor, 403, gate.decide().code(), gate.decide().message());
         }
         if (runs.countRunning() >= limits.maxConcurrentRuns()) {
-            throw new ControlException(409, "CONCURRENCY_CAP", "At most " + limits.maxConcurrentRuns() + " runs may be active");
+            throw refuse(runId, actor, 409, "CONCURRENCY_CAP", "At most " + limits.maxConcurrentRuns() + " runs may be active");
         }
         if (!runs.markRunning(runId, durationSeconds, ttlSeconds, owner)) {
             throw new ControlException(409, "NOT_ARMED", "Run " + runId + " changed state");
@@ -107,6 +120,12 @@ public class RunTransitions {
             }
         }
         return ended;
+    }
+
+    /** Every start refusal is audited (review PERS-8). */
+    private ControlException refuse(String runId, String actor, int status, String code, String message) {
+        runs.audit(runId, actor, "DENIED", "{\"code\":\"" + code + "\"}");
+        return new ControlException(status, code, message);
     }
 
     static String hash(String token) {

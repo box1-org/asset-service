@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
 class TelemetryFlowTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final String writer = Tokens.clientRoles("writer", "telemetry-writer");
-    private final String reader = Tokens.clientRoles("reader");
+    private final String reader = Tokens.clientRoles("reader", "telemetry-reader");
 
     private static String asset() {
         return "asset_it_" + UUID.randomUUID().toString().substring(0, 8);
@@ -188,6 +188,22 @@ class TelemetryFlowTest {
         assertNotNull(event.path("traceparent").asText());
         assertEquals(readingTrace, event.path("traceparent").asText().split("-")[1], "the alert event continues the reading's trace");
         ContractSchemas.assertValid(event);
+    }
+
+    @Test
+    void anAcceptedFutureTimestampDoesNotSuspendLaterAlerts() throws Exception {
+        ensureConsuming();
+        String asset = asset();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Instant skewed = now.plus(4, ChronoUnit.MINUTES);
+        post(asset, "pressure", skewed, 5, "bar");
+        await("skewed reading stored", () -> !readings(asset, "?from=" + skewed + "&to=" + skewed.plusSeconds(1)).isEmpty());
+        for (int i = 0; i < 3; i++) {
+            Thread.sleep(20);
+            post(asset, "pressure", Instant.now(), 8.5, "bar");
+        }
+        await("alert despite an earlier +4 min reading", () -> !given().auth().oauth2(reader).queryParam("assetId", asset)
+                .get("/api/v1/alerts").then().extract().jsonPath().getList("items").isEmpty());
     }
 
     @Test

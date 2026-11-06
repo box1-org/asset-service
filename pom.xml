@@ -18,7 +18,7 @@
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
         <!-- box1-ops-contracts commit that contract tests validate against. -->
-        <contracts.ref>8764f7d437ffea837678353cbc3dc2f50d752e52</contracts.ref>
+        <contracts.ref>2fe191dc7587be4c17e0c672af6e324e995aab57</contracts.ref>
         <!-- Tests tagged "containers" need local PostgreSQL and Kafka; the CI task has neither. Use -Pcontainers. -->
         <test.excluded.groups>containers</test.excluded.groups>
     </properties>

@@ -112,6 +112,24 @@ class RunScriptTest {
     }
 
     @Test
+    void aProducerPauseNeverOutlivesItsRunAndForwardSkewIsAlwaysRejectable() {
+        for (long seed = 0; seed < 60; seed++) {
+            RunConfig config = new RunConfig(RunKind.CHAOS, 1, 2, METRICS, 1, 40);
+            RunScript script = new RunScript(seed, config, Instant.EPOCH, CATALOG, 4096, 5, Duration.ofSeconds(30));
+            while (script.hasNext()) {
+                Emission e = script.next();
+                if (e.pause() != null) {
+                    assertTrue(e.offsetMillis() + e.pause().toMillis() <= 40_000, "pause ends by the run end: " + e.offsetMillis() + "+" + e.pause());
+                }
+                if (e.injection() != null && e.injection().entry() == ChaosEntry.CLOCK_SKEW) {
+                    long skew = Long.parseLong(e.injection().parameters().replace("ms", ""));
+                    assertTrue(skew < 0 || skew > 5 * 60_000, "forward skew is beyond the 5 min limit: " + skew);
+                }
+            }
+        }
+    }
+
+    @Test
     void seedFormatIsSixteenLowercaseHex() {
         assertEquals("5eed00000000002a", SeededRandom.format(SeededRandom.parse("5eed00000000002a")));
         assertEquals("ffffffffffffffff", SeededRandom.format(-1L));

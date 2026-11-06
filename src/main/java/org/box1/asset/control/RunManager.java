@@ -43,6 +43,7 @@ public class RunManager {
     private static final Logger LOG = Logger.getLogger(RunManager.class);
     private static final long TICK_MILLIS = 50;
     private static final int MAX_PER_TICK = 500;
+    static final int MAX_ARMED = 4;
 
     private final String owner = "pod-" + UUID.randomUUID();
     private final Map<String, ActiveRun> active = new ConcurrentHashMap<>();
@@ -58,6 +59,10 @@ public class RunManager {
     private final ObjectMapper mapper = new ObjectMapper();
     private final SecureRandom random = new SecureRandom();
     private ScheduledExecutorService ticker;
+    /** Serializes start-and-launch with stop-all and reset in this pod (review PERS-2, ARCH-7). */
+    private final Object lifecycle = new Object();
+    private volatile String pausedBy;
+    private volatile long heartbeatFailingSinceNanos;
 
     public RunManager(RunStore runs, RunTransitions transitions, ChaosGate gate, MetricCatalog catalog, IngestionPipeline pipeline,
             ReadingPublisher publisher, AssetConfig config, MeterRegistry registry, Tracer tracer) {
@@ -111,10 +116,10 @@ public class RunManager {
         String token = HexFormat.of().formatHex(tokenBytes);
         String configJson = json(runConfig);
         long armSeconds = config.control().armLifetime().toSeconds();
-        runs.insertArmed(runId, runConfig.kind(), actor, seedText, configJson, gate.namespace(), armSeconds, RunTransitions.hash(token), owner);
         String expected = SequenceDigest.of(RunScript.first(seed, runConfig, Instant.EPOCH, catalog, config.ingest().maxBodyBytes(),
                 config.chaos().maxBurstMultiplier(), config.chaos().maxPause(), SequenceDigest.LENGTH), Instant.EPOCH);
-        runs.audit(runId, actor, "ARM", json(Map.of("seed", seedText, "config", runConfig, "expectedDigest", expected)));
+        transitions.arm(runId, runConfig.kind(), actor, seedText, configJson, gate.namespace(), armSeconds, RunTransitions.hash(token), owner,
+                json(Map.of("seed", seedText, "config", runConfig, "expectedDigest", expected)), MAX_ARMED);
         RunRecord record = runs.find(runId).orElseThrow();
         return new Armed(runId, seedText, token, record.armedUntil(), gate.namespace(), gate.environment(), runConfig.baseRate(), expected);
     }
@@ -125,9 +130,11 @@ public class RunManager {
         RunConfig runConfig = parse(armed.config());
         long duration = runConfig.durationSeconds();
         long ttl = duration + config.control().ttlGrace().toSeconds();
-        RunRecord started = transitions.start(actor, runId, confirmToken, confirmNamespace, owner, duration, ttl);
-        launch(started, runConfig);
-        return started;
+        synchronized (lifecycle) {
+            RunRecord started = transitions.start(actor, runId, confirmToken, confirmNamespace, owner, duration, ttl);
+            launch(started, runConfig);
+            return started;
+        }
     }
 
     public boolean stop(String actor, String runId) {
@@ -137,6 +144,11 @@ public class RunManager {
             return end(run, "STOPPED", "stopped by " + actor, actor, "STOP");
         }
         return transitions.finish(runId, "STOPPED", "stopped by " + actor, actor, "STOP", "{}");
+    }
+
+    /** Test hook: the run that last paused the producer, if it has not been resumed. */
+    String pausedBy() {
+        return pausedBy;
     }
 
     /** Stops every run everywhere this database knows of, and resumes the producer. */
@@ -150,14 +162,21 @@ public class RunManager {
     }
 
     private List<String> stopEverything(String actor, String action) {
-        for (ActiveRun run : active.values()) {
-            run.cancel();
+        synchronized (lifecycle) {
+            for (ActiveRun run : active.values()) {
+                run.cancel();
+            }
+            active.clear();
+            resumeProducer();
+            List<String> stopped = transitions.stopAll(actor, action);
+            LOG.infof("%s by %s stopped %d runs", action, actor, stopped.size());
+            return stopped;
         }
-        active.clear();
+    }
+
+    private void resumeProducer() {
+        pausedBy = null;
         publisher.resume();
-        List<String> stopped = transitions.stopAll(actor, action);
-        LOG.infof("%s by %s stopped %d runs", action, actor, stopped.size());
-        return stopped;
     }
 
     public Map<String, ActiveRun> active() {
@@ -178,16 +197,47 @@ public class RunManager {
 
     @Scheduled(every = "${box1.control.heartbeat:5s}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void heartbeat() {
+        boolean failed = false;
         for (ActiveRun run : List.copyOf(active.values())) {
             try {
                 if (!runs.heartbeat(run.runId, owner, run.emitted, run.rejected, run.digest.value())) {
                     LOG.infof("Run %s is no longer running in the database; stopping locally", run.runId);
-                    run.cancel();
-                    active.remove(run.runId);
+                    stopLocally(run);
                 }
             } catch (StoreException error) {
+                failed = true;
                 LOG.warnf("Heartbeat for %s failed (%s)", run.runId, error.getMessage());
             }
+        }
+        failSafe(failed);
+    }
+
+    /**
+     * Without the database nobody can stop a run through the console (readiness is DOWN) and the reaper cannot run, so a
+     * pod that cannot heartbeat for longer than the stale limit stops its own runs (review OPS-4).
+     */
+    void failSafe(boolean failed) {
+        if (!failed) {
+            heartbeatFailingSinceNanos = 0;
+            return;
+        }
+        long now = System.nanoTime();
+        if (heartbeatFailingSinceNanos == 0) {
+            heartbeatFailingSinceNanos = now;
+        } else if (now - heartbeatFailingSinceNanos > config.control().staleHeartbeat().toNanos()) {
+            LOG.errorf("Heartbeats failing for over %s; stopping %d local runs as a fail-safe", config.control().staleHeartbeat(),
+                    active.size());
+            for (ActiveRun run : List.copyOf(active.values())) {
+                stopLocally(run);
+            }
+        }
+    }
+
+    private void stopLocally(ActiveRun run) {
+        run.cancel();
+        active.remove(run.runId);
+        if (run.runId.equals(pausedBy)) {
+            resumeProducer();
         }
     }
 
@@ -196,9 +246,9 @@ public class RunManager {
     void reap() {
         try {
             for (String runId : transitions.reap(config.control().staleHeartbeat().toSeconds())) {
-                ActiveRun run = active.remove(runId);
+                ActiveRun run = active.get(runId);
                 if (run != null) {
-                    run.cancel();
+                    stopLocally(run);
                 }
             }
         } catch (StoreException error) {
@@ -211,7 +261,7 @@ public class RunManager {
         RunScript script = new RunScript(SeededRandom.parse(record.seed()), runConfig, start, catalog, config.ingest().maxBodyBytes(),
                 config.chaos().maxBurstMultiplier(), config.chaos().maxPause());
         ActiveRun run = new ActiveRun(record.runId(), record.kind(), record.seed(), runConfig, script, start, System.nanoTime(),
-                new SequenceDigest(start));
+                new SequenceDigest(start), new org.box1.asset.ingest.TokenBucket(config.control().maxRunRatePerSecond(), System::nanoTime));
         active.put(run.runId, run);
         run.future = ticker.scheduleAtFixedRate(() -> tick(run), 0, TICK_MILLIS, TimeUnit.MILLISECONDS);
         LOG.infof("Run %s started: %s seed %s, %d readings/s for %d s", run.runId, run.kind, run.seed, runConfig.baseRate(),
@@ -256,7 +306,14 @@ public class RunManager {
         }
         if (emission.pause() != null) {
             Duration pause = emission.pause().compareTo(config.chaos().maxPause()) > 0 ? config.chaos().maxPause() : emission.pause();
+            pausedBy = run.runId;
             publisher.pause(pause);
+            return;
+        }
+        if (!run.bucket.tryAcquire()) {
+            // The run's actual rate, bursts included, never exceeds the per-run cap (review ARCH-2).
+            run.rejected++;
+            registry.counter("asset.ingest.rejected", "source", source.tag(), "reason", "run_rate").increment();
             return;
         }
         Span span = tracer.spanBuilder("asset-service run emit").setAttribute("asset.run.id", run.runId).startSpan();
@@ -275,8 +332,7 @@ public class RunManager {
     }
 
     private boolean end(ActiveRun run, String state, String reason, String actor, String action) {
-        run.cancel();
-        active.remove(run.runId);
+        stopLocally(run);
         String digest = run.digest.finish();
         try {
             runs.progress(run.runId, run.emitted, run.rejected, digest);
@@ -384,6 +440,7 @@ public class RunManager {
         final Instant startedAt;
         final long startedNanos;
         final SequenceDigest digest;
+        final org.box1.asset.ingest.TokenBucket bucket;
         volatile long emitted;
         volatile long rejected;
         volatile Emission.Injection injection;
@@ -391,7 +448,8 @@ public class RunManager {
         ScheduledFuture<?> future;
 
         ActiveRun(String runId, RunKind kind, String seed, RunConfig config, RunScript script, Instant startedAt, long startedNanos,
-                SequenceDigest digest) {
+                SequenceDigest digest, org.box1.asset.ingest.TokenBucket bucket) {
+            this.bucket = bucket;
             this.runId = runId;
             this.kind = kind;
             this.seed = seed;

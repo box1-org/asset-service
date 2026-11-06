@@ -23,6 +23,8 @@ public class FullStack implements QuarkusTestProfile {
         config.put("box1.readiness.database", "true");
         config.put("mp.messaging.incoming.telemetry-in.enabled", "true");
         config.put("mp.messaging.incoming.telemetry-in.group.id", "asset-service-it-" + UUID.randomUUID());
+        // A fresh test group on "earliest" would replay the whole local topic; tests wait for a probe instead.
+        config.put("mp.messaging.incoming.telemetry-in.auto.offset.reset", "latest");
         config.put("box1.outbox.interval", "200ms");
         config.put("box1.gauges.interval", "1s");
         config.put("box1.control.heartbeat", "1s");

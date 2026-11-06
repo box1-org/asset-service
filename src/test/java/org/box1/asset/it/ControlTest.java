@@ -129,6 +129,14 @@ class ControlTest {
     }
 
     @Test
+    void openArmsAreCapped() {
+        for (int i = 0; i < 4; i++) {
+            arm("{\"kind\":\"LOAD\",\"durationSeconds\":30}");
+        }
+        console().body("{\"kind\":\"LOAD\"}").post("/api/v1/control/runs").then().statusCode(409).body("code", equalTo("ARM_CAP"));
+    }
+
+    @Test
     void anArmThatIsNotConfirmedInTimeCannotStart() throws Exception {
         JsonPath armed = arm("{\"kind\":\"LOAD\",\"durationSeconds\":30}");
         Thread.sleep(3500);

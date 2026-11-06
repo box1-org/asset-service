@@ -63,6 +63,13 @@ public class RunStore {
         });
     }
 
+    public int countArmed() {
+        return query("SELECT count(*) FROM control_run WHERE state = 'ARMED' AND armed_until > now()", "count armed", r -> {
+            r.next();
+            return r.getInt(1);
+        });
+    }
+
     public boolean armExpired(String runId) {
         return query("SELECT armed_until < now() FROM control_run WHERE run_id = ?", "arm expiry", r -> r.next() && r.getBoolean(1), runId);
     }

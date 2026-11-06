@@ -10,7 +10,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import io.quarkus.security.Authenticated;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -46,6 +45,8 @@ public class ReadingsResource {
     private final TelemetryStore store;
     private final Clock clock;
     private final Duration ackTimeout;
+    /** Requests waiting for an acknowledgement; bounded so a pause cannot exhaust the shared worker pool (MSG-5). */
+    private final java.util.concurrent.Semaphore waiting = new java.util.concurrent.Semaphore(64);
 
     public ReadingsResource(IngestionPipeline pipeline, TelemetryStore store, Clock clock, AssetConfig config) {
         this.pipeline = pipeline;
@@ -73,6 +74,18 @@ public class ReadingsResource {
             content = @Content(mediaType = Problem.MEDIA_TYPE))
     public Response ingest(@Parameter(hidden = true) byte[] body, @HeaderParam("X-Correlation-ID") String correlationId) {
         String correlation = correlationId != null && correlationId.matches("[A-Za-z0-9:_.-]{1,128}") ? correlationId : null;
+        if (!waiting.tryAcquire()) {
+            return Response.fromResponse(Problem.response(503, "Busy", "TOO_MANY_WAITING",
+                    "Too many readings are waiting for Kafka; retry later. Retrying is safe.")).header("Retry-After", 2).build();
+        }
+        try {
+            return publish(body, correlation);
+        } finally {
+            waiting.release();
+        }
+    }
+
+    private Response publish(byte[] body, String correlation) {
         IngestionPipeline.Submission submission = pipeline.submitRaw(body, Source.API, correlation);
         try {
             submission.acked().get(ackTimeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -92,7 +105,7 @@ public class ReadingsResource {
 
     @GET
     @Path("/assets/{assetId}/readings")
-    @Authenticated
+    @RolesAllowed({"telemetry-reader", "telemetry-writer", "chaos-operator"})
     @SecurityRequirement(name = "bearer")
     @Operation(summary = "Readings for one asset in a time window, ordered by measuredAt then metricName, keyset-paginated")
     public Page<ReadingView> readings(@PathParam("assetId") String assetId, @QueryParam("from") String from, @QueryParam("to") String to,
@@ -117,7 +130,7 @@ public class ReadingsResource {
 
     @GET
     @Path("/alerts")
-    @Authenticated
+    @RolesAllowed({"telemetry-reader", "telemetry-writer", "chaos-operator"})
     @SecurityRequirement(name = "bearer")
     @Operation(summary = "Alert episodes, newest first, keyset-paginated")
     public Page<org.box1.asset.store.AlertView> alerts(@QueryParam("status") String status, @QueryParam("assetId") String assetId,

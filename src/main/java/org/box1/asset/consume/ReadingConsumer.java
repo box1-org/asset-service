@@ -25,6 +25,8 @@ import org.jboss.logging.MDC;
  */
 @ApplicationScoped
 public class ReadingConsumer {
+    // One ordered worker processes the whole channel, so a record held in retry stalls every partition (review MSG-2);
+    // ProjectionHealthCheck makes that visible.
     private static final Logger LOG = Logger.getLogger(ReadingConsumer.class);
     private static final long MAX_BACKOFF_MILLIS = 30_000;
     static final int MAX_PERMANENT_ATTEMPTS = 5;
@@ -45,6 +47,8 @@ public class ReadingConsumer {
     private final MeterRegistry registry;
     private final Tracer tracer;
     private volatile boolean stopping;
+    /** When the record now being retried first failed, as System.nanoTime(), or 0 when nothing is retrying. */
+    private volatile long retryingSinceNanos;
 
     public ReadingConsumer(EventParser parser, ReadingProjector projector, MeterRegistry registry, Tracer tracer) {
         this.parser = parser;
@@ -77,7 +81,12 @@ public class ReadingConsumer {
             MDC.put("eventId", inbound.eventId().toString());
             MDC.put("assetId", inbound.reading().assetId());
             MDC.put("correlationId", inbound.correlationId());
-            if (!projectWithRetry(inbound)) {
+            Boolean projected = projectWithRetry(inbound);
+            if (projected == null) {
+                // Shutting down mid-retry: neither ack nor nack. The offset stays uncommitted and the record is redelivered.
+                return new java.util.concurrent.CompletableFuture<>();
+            }
+            if (!projected) {
                 registry.counter("asset.consume.dead.lettered", "reason", "PROJECTION_FAILED").increment();
                 return message.nack(new PoisonEventException("PROJECTION_FAILED"));
             }
@@ -96,35 +105,48 @@ public class ReadingConsumer {
      * outage never dead-letters a valid reading. Any other failure is a defect or bad data that will not heal by
      * waiting: it gets {@link #MAX_PERMANENT_ATTEMPTS} attempts, then the record is dead-lettered. Returns false then.
      */
-    private boolean projectWithRetry(InboundReading inbound) {
+    private Boolean projectWithRetry(InboundReading inbound) {
         long backoff = 250;
         int permanent = 0;
-        while (true) {
-            try {
-                projector.project(inbound, Envelopes.currentTraceparent());
-                return true;
-            } catch (RuntimeException error) {
-                if (stopping) {
-                    throw error;
-                }
-                boolean transientFailure = Failures.isTransient(error);
-                registry.counter("asset.consume.retries", "kind", transientFailure ? "transient" : "permanent").increment();
-                if (!transientFailure && ++permanent >= MAX_PERMANENT_ATTEMPTS) {
-                    LOG.errorf(error, "Projection of %s failed %d times with a non-transient error; dead-lettering it",
-                            inbound.eventId(), permanent);
-                    return false;
-                }
-                LOG.warnf(transientFailure ? null : error, "Projection of %s failed (%s, %s); retrying in %d ms", inbound.eventId(),
-                        error.getClass().getSimpleName(), transientFailure ? "transient" : "attempt " + permanent, backoff);
+        try {
+            while (true) {
                 try {
-                    Thread.sleep(backoff);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    throw error;
+                    projector.project(inbound, Envelopes.currentTraceparent());
+                    return true;
+                } catch (RuntimeException error) {
+                    if (stopping) {
+                        return null;
+                    }
+                    if (retryingSinceNanos == 0) {
+                        retryingSinceNanos = System.nanoTime();
+                    }
+                    boolean transientFailure = Failures.isTransient(error);
+                    registry.counter("asset.consume.retries", "kind", transientFailure ? "transient" : "permanent").increment();
+                    if (!transientFailure && ++permanent >= MAX_PERMANENT_ATTEMPTS) {
+                        LOG.errorf(error, "Projection of %s failed %d times with a non-transient error; dead-lettering it",
+                                inbound.eventId(), permanent);
+                        return false;
+                    }
+                    LOG.warnf(transientFailure ? null : error, "Projection of %s failed (%s, %s); retrying in %d ms", inbound.eventId(),
+                            error.getClass().getSimpleName(), transientFailure ? "transient" : "attempt " + permanent, backoff);
+                    try {
+                        Thread.sleep(backoff);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                    backoff = Math.min(MAX_BACKOFF_MILLIS, backoff * 2);
                 }
-                backoff = Math.min(MAX_BACKOFF_MILLIS, backoff * 2);
             }
+        } finally {
+            retryingSinceNanos = 0;
         }
+    }
+
+    /** How long the record now being retried has been failing; zero when nothing is retrying. */
+    public java.time.Duration retrying() {
+        long since = retryingSinceNanos;
+        return since == 0 ? java.time.Duration.ZERO : java.time.Duration.ofNanos(System.nanoTime() - since);
     }
 
     void onStop(@jakarta.enterprise.event.Observes io.quarkus.runtime.ShutdownEvent event) {

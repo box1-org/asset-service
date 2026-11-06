@@ -15,9 +15,14 @@ public class PathTenantResolver implements TenantResolver {
     @Override
     public String resolve(RoutingContext context) {
         String path = context.normalizedPath();
-        if ("/console".equals(path) || path.startsWith("/console/") || path.startsWith("/api/v1/control/")) {
+        if (isConsole(path)) {
             return CONSOLE;
         }
         return "Default";
+    }
+
+    /** Broad on purpose: any path beginning with the console or control prefix uses the browser tenant (SEC-6). */
+    static boolean isConsole(String path) {
+        return path.startsWith("/console") || path.startsWith("/api/v1/control");
     }
 }

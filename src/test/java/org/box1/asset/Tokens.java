@@ -20,6 +20,13 @@ public final class Tokens {
                 .sign("privateKey.jwk");
     }
 
+    /** What Keycloak issues to another client for a user who holds asset-service roles: aud includes asset-service. */
+    public static String otherClient(String user, String... roles) {
+        return Jwt.preferredUserName(user).subject(user).issuer("https://server.example.com").audience(java.util.Set.of("asset-service", "openshell-cli"))
+                .claim("azp", "openshell-cli").claim("resource_access", Map.of("asset-service", Map.of("roles", List.of(roles))))
+                .expiresIn(300).jws().keyId("1").sign("privateKey.jwk");
+    }
+
     public static String otherAudience(String user, String... roles) {
         return Jwt.preferredUserName(user).subject(user).issuer("https://server.example.com").audience("developer-hub")
                 .claim("resource_access", Map.of("asset-service", Map.of("roles", List.of(roles)))).expiresIn(300).jws().keyId("1")
@@ -27,6 +34,7 @@ public final class Tokens {
     }
 
     private static io.smallrye.jwt.build.JwtClaimsBuilder base(String user) {
-        return Jwt.preferredUserName(user).subject(user).issuer("https://server.example.com").audience("asset-service").expiresIn(300);
+        return Jwt.preferredUserName(user).subject(user).issuer("https://server.example.com").audience("asset-service").claim("azp", "asset-service")
+                .expiresIn(300);
     }
 }

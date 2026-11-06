@@ -29,7 +29,7 @@ public class OutboxRelay {
     private static final Logger LOG = Logger.getLogger(OutboxRelay.class);
     private static final String CLAIM = "UPDATE outbox SET claimed_until = now() + interval '60 seconds' WHERE id IN ("
             + " SELECT id FROM outbox WHERE published_at IS NULL AND next_attempt_at <= now()"
-            + " AND (claimed_until IS NULL OR claimed_until < now()) ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED)"
+            + " AND (claimed_until IS NULL OR claimed_until < now()) ORDER BY id LIMIT 20 FOR UPDATE SKIP LOCKED)"
             + " RETURNING id, topic, record_key, body";
 
     private final DataSource dataSource;
@@ -40,7 +40,7 @@ public class OutboxRelay {
         this.dataSource = dataSource;
         this.producer = producer;
         this.registry = registry;
-        registry.gauge("asset.outbox.pending", this, OutboxRelay::pendingOrNaN);
+        registry.gauge("asset.outbox.pending", this, r -> r.pending);
     }
 
     @Scheduled(every = "${box1.outbox.interval:1s}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
@@ -52,7 +52,8 @@ public class OutboxRelay {
             LOG.warnf("Outbox claim failed (%s)", error.getClass().getSimpleName());
             return;
         }
-        for (Row row : rows) {
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.get(i);
             try {
                 Future<?> ack = producer.send(new ProducerRecord<>(row.topic(), row.key(), row.body()));
                 ack.get(15, TimeUnit.SECONDS);
@@ -63,14 +64,27 @@ public class OutboxRelay {
                 return;
             } catch (Exception error) {
                 registry.counter("asset.outbox.failures").increment();
-                LOG.warnf("Outbox row %d not published (%s); will retry", row.id(), error.getClass().getSimpleName());
+                LOG.warnf("Outbox row %d not published (%s); stopping this batch and backing off", row.id(), error.getClass().getSimpleName());
+                // Stop at the first failure: later rows would overtake it, and a broker outage would make every row wait
+                // its full timeout, outliving the claim (reviews PERS-6, OPS-5, MSG-6).
                 try {
-                    mark(row.id(), false);
+                    for (Row rest : rows.subList(i, rows.size())) {
+                        mark(rest.id(), false);
+                    }
                 } catch (SQLException ignored) {
-                    LOG.warn("Outbox backoff update failed; the claim expires in 60 s");
+                    LOG.warn("Outbox backoff update failed; the claims expire in 60 s");
                 }
+                return;
             }
         }
+    }
+
+    private volatile double pending = Double.NaN;
+
+    /** Measured on a schedule, not on every metrics scrape, to keep scrapes off the connection pool (review OPS-10). */
+    @Scheduled(every = "${box1.gauges.interval:10s}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void measurePending() {
+        pending = pendingOrNaN();
     }
 
     private List<Row> claim() throws SQLException {

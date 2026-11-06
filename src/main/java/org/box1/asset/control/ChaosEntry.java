@@ -7,7 +7,7 @@ public enum ChaosEntry {
     SUSTAINED_BREACH("One asset above warning", "10-30 s"),
     FLAP("Values crossing the warning level", "10-30 s, alternating above warning and inside the hysteresis band"),
     STALE_ASSET("One asset goes silent", "10-30 s"),
-    CLOCK_SKEW("Timestamps shifted", "5-15 s; +2 to +10 min (rejected) or -1 to -30 min (accepted)"),
+    CLOCK_SKEW("Timestamps shifted", "5-15 s; +6 to +10 min (rejected: beyond the 5 min limit) or -1 to -30 min (accepted, not evaluated)"),
     OUT_OF_ORDER("Timestamps shuffled", "5-15 s, blocks of 3-8 readings"),
     DUPLICATE("Readings re-sent verbatim", "1-10 readings"),
     INVALID_UNIT("Wrong unit for the metric", "1-5 readings, all rejected"),
