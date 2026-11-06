@@ -23,7 +23,7 @@ public class RetentionJob {
     }
 
     @Scheduled(every = "${box1.retention.interval:60s}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
-    void run() {
+    public void run() {
         try {
             long seconds = retention.readings().toSeconds();
             int batch = retention.batchSize();
