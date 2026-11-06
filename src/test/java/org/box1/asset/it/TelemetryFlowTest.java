@@ -84,6 +84,22 @@ class TelemetryFlowTest {
         throw new AssertionError("The consumer never consumed a probe reading");
     }
 
+    @jakarta.inject.Inject
+    javax.sql.DataSource dataSource;
+
+    /** "t" when the alert's outbox event has been acknowledged by Kafka. */
+    private String published(String alertId) {
+        try (java.sql.Connection c = dataSource.getConnection(); java.sql.PreparedStatement s = c.prepareStatement(
+                "SELECT (o.published_at IS NOT NULL)::text FROM outbox o JOIN alert a ON a.event_id = o.event_id WHERE a.alert_id = ?")) {
+            s.setString(1, alertId);
+            try (java.sql.ResultSet r = s.executeQuery()) {
+                return r.next() ? r.getString(1).substring(0, 1) : "";
+            }
+        } catch (java.sql.SQLException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
     private static void await(String what, BooleanSupplier condition) throws InterruptedException {
         long end = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         while (System.nanoTime() < end) {
@@ -130,6 +146,7 @@ class TelemetryFlowTest {
     void flappingGivesOneAlertOneEventThenOneClearWithLinkedIds() throws Exception {
         ensureConsuming();
         String asset = asset();
+        Instant testStart = Instant.now().minusSeconds(60);
         Instant base = Instant.now().minus(5, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.SECONDS);
         List<String> eventIds = new ArrayList<>();
         List<String> traceparents = new ArrayList<>();
@@ -151,7 +168,8 @@ class TelemetryFlowTest {
         String sourceEventId = alerts.getString("items[0].sourceEventId");
         assertEquals(eventIds.get(4), sourceEventId, "the third breaching reading (index 4) activated it");
         String alertId = alerts.getString("items[0].alertId");
-        List<ConsumerRecord<String, byte[]>> events = Kafka.read("box1.telemetry.events.v1",
+        await("outbox row published", () -> "t".equals(published(alertId)));
+        List<ConsumerRecord<String, byte[]>> events = Kafka.read("box1.telemetry.events.v1", testStart,
                 list -> list.stream().anyMatch(r -> new String(r.value(), StandardCharsets.UTF_8).contains(alertId)), Duration.ofSeconds(20));
         List<JsonNode> thresholdEvents = new ArrayList<>();
         for (ConsumerRecord<String, byte[]> record : events) {
@@ -181,7 +199,7 @@ class TelemetryFlowTest {
         Instant at = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.SECONDS);
         post(asset, "pressure", at, 5, "bar");
         await("valid reading after poison is stored", () -> readings(asset, "?from=" + at.minusSeconds(1) + "&to=" + at.plusSeconds(1)).size() == 1);
-        List<ConsumerRecord<String, byte[]>> dead = Kafka.read("box1.telemetry.dlq.v1",
+        List<ConsumerRecord<String, byte[]>> dead = Kafka.read("box1.telemetry.dlq.v1", Instant.now().minusSeconds(120),
                 list -> list.stream().anyMatch(r -> new String(r.value(), StandardCharsets.UTF_8).contains(marker)), Duration.ofSeconds(20));
         ConsumerRecord<String, byte[]> record = dead.stream().filter(r -> new String(r.value(), StandardCharsets.UTF_8).contains(marker))
                 .findFirst().orElseThrow(() -> new AssertionError("poison record not dead-lettered"));

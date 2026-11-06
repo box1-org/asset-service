@@ -31,13 +31,27 @@ final class Kafka {
         }
     }
 
-    /** Reads the topic from the beginning until {@code done} holds or the timeout passes. */
-    static List<ConsumerRecord<String, byte[]>> read(String topic, Predicate<List<ConsumerRecord<String, byte[]>>> done, Duration timeout) {
+    /**
+     * Reads the topic from records written at or after {@code since} until {@code done} holds or the timeout passes.
+     * Seeking by time keeps the read short on a topic that holds earlier local runs.
+     */
+    static List<ConsumerRecord<String, byte[]>> read(String topic, java.time.Instant since,
+            Predicate<List<ConsumerRecord<String, byte[]>>> done, Duration timeout) {
         List<ConsumerRecord<String, byte[]>> records = new ArrayList<>();
         try (KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(Map.of("bootstrap.servers", BOOTSTRAP, "group.id",
                 "it-reader-" + UUID.randomUUID(), "auto.offset.reset", "earliest", "enable.auto.commit", "false"),
                 new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(topic));
+            List<org.apache.kafka.common.TopicPartition> partitions = consumer.partitionsFor(topic).stream()
+                    .map(p -> new org.apache.kafka.common.TopicPartition(topic, p.partition())).toList();
+            consumer.assign(partitions);
+            Map<org.apache.kafka.common.TopicPartition, Long> times = new java.util.HashMap<>();
+            partitions.forEach(p -> times.put(p, since.toEpochMilli()));
+            Map<org.apache.kafka.common.TopicPartition, org.apache.kafka.clients.consumer.OffsetAndTimestamp> offsets = consumer.offsetsForTimes(times);
+            Map<org.apache.kafka.common.TopicPartition, Long> ends = consumer.endOffsets(partitions);
+            for (org.apache.kafka.common.TopicPartition p : partitions) {
+                org.apache.kafka.clients.consumer.OffsetAndTimestamp at = offsets.get(p);
+                consumer.seek(p, at == null ? ends.get(p) : at.offset());
+            }
             long end = System.nanoTime() + timeout.toNanos();
             while (System.nanoTime() < end && !done.test(records)) {
                 consumer.poll(Duration.ofMillis(250)).forEach(records::add);
