@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>box1 Operations · Asset telemetry console</title>
+  <link rel="icon" type="image/png" href="brand/box1-mark.png">
   <link rel="stylesheet" href="console.css">
   <script src="console.js" defer></script>
 </head>
@@ -11,7 +12,7 @@
   <a class="skip" href="#main">Skip to controls</a>
   <header class="masthead">
     <div class="brand">
-      <span class="brand-mark" id="brand-mark" aria-hidden="true"></span>
+      <img class="brand-mark" src="brand/box1-mark.png" alt="" width="32" height="32">
       <span class="wordmark">BOX1 <span class="sep">/</span> OPERATIONS</span>
       <span class="product">Asset telemetry · load and chaos console</span>
     </div>
@@ -56,6 +57,7 @@
             <legend>Run kind</legend>
             <label><input type="radio" name="kind" value="LOAD" checked> Load only</label>
             <label><input type="radio" name="kind" value="CHAOS"> Load with random chaos</label>
+            <p class="hint" id="chaos-off" hidden>Chaos is switched off for this namespace. The service refuses chaos runs until an operator enables it.</p>
           </fieldset>
           <div class="field-grid">
             <label for="sites">Sites</label>
@@ -116,7 +118,8 @@
 
     <div class="stack">
       <section aria-labelledby="recent-title" class="panel">
-        <h2 id="recent-title">Recent runs</h2>
+        <details>
+          <summary><h2 id="recent-title">Recent runs <span class="hint" id="recent-title-count"></span></h2></summary>
         <div class="table-scroll" tabindex="0" role="region" aria-labelledby="recent-title">
         <table>
           <caption class="visually-hidden">The last 25 runs</caption>
@@ -124,9 +127,11 @@
           <tbody id="recent-runs"></tbody>
         </table>
         </div>
+      </details>
       </section>
       <section aria-labelledby="audit-title" class="panel">
-        <h2 id="audit-title">Audit</h2>
+        <details>
+          <summary><h2 id="audit-title">Audit <span class="hint" id="audit-title-count"></span></h2></summary>
         <div class="table-scroll" tabindex="0" role="region" aria-labelledby="audit-title">
         <table>
           <caption class="visually-hidden">The latest audit entries, newest first</caption>
@@ -134,6 +139,7 @@
           <tbody id="audit"></tbody>
         </table>
         </div>
+      </details>
       </section>
     </div>
 

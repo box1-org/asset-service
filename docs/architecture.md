@@ -77,7 +77,9 @@ than 24 h, a 2,000,000-row cap, cleared alerts after 30 days, audit and runs aft
 ## Load and chaos console
 
 The page is plain HTML, CSS and JavaScript under `src/main/resources/META-INF/resources/console/`,
-with no build step, no CDN and no external fonts. It calls only `/api/v1/control/*`.
+with no build step, no CDN and no external fonts. The mark `console/brand/box1-mark.png` is the box1 cube "1" brand
+mark, unmodified: the `box1-org` GitHub organization avatar (400 x 400 PNG, SHA-256 `11ccbb2d…62ea`), supplied by the
+project owner. Do not regenerate it. It calls only `/api/v1/control/*`.
 **The page enforces nothing.** It renders limits it reads from the service.
 
 - **Access.** Keycloak code flow with PKCE on the `console` OIDC tenant, chosen by path only;

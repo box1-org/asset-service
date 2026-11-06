@@ -92,8 +92,14 @@
     set('r-lag', r.consumerLag === null ? null : `${r.consumerLag} records`);
     set('r-queue', `${r.producerInFlight} / ${r.producerCapacity}`);
     set('r-producer', r.producerPaused ? `PAUSED until ${time(r.producerPausedUntil)}` : 'sending');
+    // Mirrors the server's gate for clarity only; the service refuses chaos regardless of what the page shows.
     const chaos = document.querySelector('input[name="kind"][value="CHAOS"]');
-    chaos.closest('label').title = state.chaos.open ? '' : 'The service will refuse chaos: ' + state.chaos.message;
+    chaos.disabled = !state.chaos.open;
+    $('chaos-off').hidden = state.chaos.open;
+    if (chaos.disabled && chaos.checked) {
+      document.querySelector('input[name="kind"][value="LOAD"]').checked = true;
+      updateComputed();
+    }
     renderOpenRuns(state.openRuns);
   }
 
@@ -141,6 +147,8 @@
   async function refreshHistory() {
     try {
       const [runs, audit] = await Promise.all([api('/runs'), api('/audit?limit=20')]);
+      $('recent-title-count').textContent = `${runs.length} recent`;
+      $('audit-title-count').textContent = `${audit.length} latest entries`;
       $('recent-runs').replaceChildren(...runs.filter((r) => r.state !== 'ARMED' && r.state !== 'RUNNING').map((run) => {
         const actions = document.createElement('td');
         actions.append(button('Replay seed', `Replay seed ${run.seed} from run ${run.runId}`, () => replay(run)));
