@@ -24,6 +24,8 @@ public final class TestCatalog {
                 "pressure", policy("bar", null, 0, 50, 8.0, 10.0, 7.5, 5.0),
                 "power", policy("kW", null, 0, 5000, 400, 480, 380, 250));
         return new AssetConfig() {
+            public java.util.Optional<java.util.List<String>> readClients() { return java.util.Optional.empty(); }
+
             public Ingest ingest() {
                 return new Ingest() {
                     public int maxRatePerSecond() { return 100; }

@@ -28,6 +28,10 @@ public interface AssetConfig {
     @WithName("threshold-overrides")
     Map<String, ThresholdOverride> thresholdOverrides();
 
+    /** Clients besides asset-service whose tokens may read, with telemetry-reader only (box1-docs#80). */
+    @WithName("read-clients")
+    Optional<List<String>> readClients();
+
     @WithName("stale-after")
     @WithDefault("PT2M")
     Duration staleAfter();

@@ -1,6 +1,7 @@
 package org.box1.asset;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
@@ -59,6 +60,33 @@ class SecurityTest {
     void readsNeedATelemetryRoleNotJustARealmLogin() {
         given().auth().oauth2(Tokens.clientRoles("anyone")).get("/api/v1/alerts").then().statusCode(403);
         given().auth().oauth2(Tokens.clientRoles("anyone")).get("/api/v1/assets/asset_a/readings").then().statusCode(403);
+    }
+
+    @Test
+    void theOperationsConsoleMayReadWithTheReaderRoleAndNothingElse() {
+        // box1-docs#80: tokens issued to operations-console keep only telemetry-reader.
+        String reader = Tokens.issuedTo("operations-console", "olivia", "telemetry-reader");
+        // Authorization is what is under test. The default build has no database, so an authorized read may answer
+        // 503 STORE_UNAVAILABLE; the container tests (it/TelemetryFlowTest) cover reads returning 200.
+        given().auth().oauth2(reader).get("/api/v1/alerts?status=ACTIVE&limit=1").then()
+                .statusCode(not(anyOf(equalTo(401), equalTo(403))));
+        given().auth().oauth2(reader).get("/api/v1/assets/asset_a/readings").then()
+                .statusCode(not(anyOf(equalTo(401), equalTo(403))));
+        given().auth().oauth2(reader).contentType(ContentType.JSON).body(READING).post("/api/v1/telemetry/readings").then()
+                .statusCode(403);
+
+        String everything = Tokens.issuedTo("operations-console", "olivia", "telemetry-writer", "chaos-operator");
+        given().auth().oauth2(everything).get("/api/v1/alerts").then().statusCode(403);
+        given().auth().oauth2(everything).contentType(ContentType.JSON).body(READING).post("/api/v1/telemetry/readings").then()
+                .statusCode(403);
+        given().redirects().follow(false).auth().oauth2(everything).get("/api/v1/control/state").then().statusCode(not(200));
+    }
+
+    @Test
+    void anyOtherClientOrNoClientIsRefusedEvenWithTheReaderRole() {
+        given().auth().oauth2(Tokens.issuedTo("openshell-cli", "eve", "telemetry-reader")).get("/api/v1/alerts").then().statusCode(401);
+        given().auth().oauth2(Tokens.issuedTo("developer-hub", "eve", "telemetry-reader")).get("/api/v1/alerts").then().statusCode(401);
+        given().auth().oauth2(Tokens.issuedTo(null, "eve", "telemetry-reader")).get("/api/v1/alerts").then().statusCode(401);
     }
 
     @Test
