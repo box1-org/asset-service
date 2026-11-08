@@ -36,8 +36,7 @@ spec:
   type: service
   lifecycle: experimental
   owner: "user:default/mike"
-  # Add when the corresponding System entity exists:
-  # system: box1-demo
+  system: box1-operations
   providesApis:
     - asset-service-api
     - box1-telemetry-events
@@ -58,6 +57,7 @@ spec:
   type: openapi
   lifecycle: experimental
   owner: "user:default/mike"
+  system: box1-operations
   definition:
     $text: https://asset-service-dev.apps.ocp.box1.org/q/openapi
 ---
@@ -76,6 +76,7 @@ spec:
   type: asyncapi
   lifecycle: experimental
   owner: "user:default/mike"
+  system: box1-operations
   definition: |
     asyncapi: 2.6.0
     info:
@@ -116,3 +117,4 @@ spec:
   type: database
   lifecycle: experimental
   owner: "user:default/mike"
+  system: box1-operations
