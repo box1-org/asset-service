@@ -44,6 +44,14 @@ public class FullStack implements QuarkusTestProfile {
         return Map.of();
     }
 
+    /** Sites go OFFLINE after 3 s without a status, so a test can watch the transition (box1-docs#130). */
+    public static class ShortSiteOffline extends FullStack {
+        @Override
+        protected Map<String, String> extra() {
+            return Map.of("asset.sites.offline-after", "PT3S");
+        }
+    }
+
     /** Chaos flag on, but this pod's namespace is not on the allowlist. */
     public static class NotAllowlisted extends FullStack {
         @Override

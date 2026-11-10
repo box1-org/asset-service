@@ -64,6 +64,12 @@ changed literal orphans the hashed ConfigMap, and the next promote waits on `Out
 | `ASSET_READING_MAX_ROWS` | `2000000` | Hard row cap |
 | `ASSET_CONTROL_ENABLED` | `false` | Load and chaos run control; the dev Deployment sets `true` |
 | `ASSET_OIDC_URL` | box1 realm | Issuer URL including RH-SSO's `/auth` path |
+| `ASSET_READ_CLIENTS` | `operations-console` | Clients whose tokens keep only `telemetry-reader` |
+| `ASSET_SITE_CLIENTS` | `site-west,site-east` | Edge site clients; their tokens keep only `site-reporter` |
+| `ASSET_SITE_OFFLINE_AFTER` | `PT90S` | No status for longer than this: `OFFLINE` (at most `PT1H`) |
+| `ASSET_SITE_DEGRADED_BUFFER_DEPTH` | `200` | Buffer depth at or above this: `DEGRADED` |
+| `ASSET_SITE_DEGRADED_BUFFER_AGE` | `PT5M` | Oldest buffered row at least this old: `DEGRADED` (at most `P1D`) |
+| `ASSET_RESERVED_SITES` | `site_ds9,site_spacedock` | Real edge sites that load and chaos runs may never emit |
 | `QUARKUS_DATASOURCE_*` | — | JDBC URL, and user and password from Secret `asset-service-postgres` |
 
 Run limits (`asset.control.*`) can only be lowered. Compiled maximums are 50 readings/s per
@@ -143,6 +149,89 @@ producer pause and a 5x burst. The service refuses to start if configuration exc
   within 60 s are counted in `asset_ingest_dropped_total` and logged with their `eventId`. Their
   clients never received a 202.
 
+## Edge site status
+
+Edge sites (box1-docs#126) report a heartbeat about every 15 s with `PUT /api/v1/sites/{siteId}/status`
+([box1-docs#130](https://github.com/box1-org/box1-docs/issues/130); contract in box1-ops-contracts `SITE.md` and
+`openapi/asset-service.yaml`). Readers list them with `GET /api/v1/sites` or read one with
+`GET /api/v1/sites/{siteId}`.
+
+**Who may write.** Only a token issued to a client in `ASSET_SITE_CLIENTS` (`azp` `site-west` or `site-east`) with
+client role `site-reporter` on `asset-service` and a `siteId` claim equal to the path `siteId`. Anything else is
+`403 SITE_MISMATCH` (or `403 FORBIDDEN` without the role); no token is `401`; a client not configured anywhere is
+`401`. Site tokens keep only `site-reporter`, so `GET /api/v1/alerts`, readings, sites and ingestion all answer
+`403` to them. The Keycloak clients, their audience mapper and the hardcoded `siteId` claim live in `box1-gitops`.
+
+**Reading a site's state.** With a reader token (`telemetry-reader`, `telemetry-writer` or `chaos-operator`; the
+operations console's client has `telemetry-reader`):
+
+```sh
+curl -sH "Authorization: Bearer $TOKEN" https://asset-service-dev.apps.ocp.box1.org/api/v1/sites/site_ds9 | jq
+```
+
+| Field | Meaning |
+|---|---|
+| `state`, `stateReasons` | Derived when read, from the thresholds below; reasons are empty when `ONLINE` |
+| `lastSeenAt`, `lastSeenAgeSeconds` | asset-service's clock when it stored the latest status, and its age now |
+| `reportedAt` | The site's own clock when it sent it (informational; a skewed site clock does not change the state) |
+| `lastReadingAt` | `measuredAt` of the site's newest stored reading, capped at the time it was stored; `null` when none |
+| `bufferDepth`, `bufferOldestAgeSeconds`, `siteEventBacklog`, `readingsDropped` | The site outbox as last reported |
+| `bootedImageDigest`, `stagedImageDigest`, `rollbackImageDigest`, `greenbootStatus`, `bundleDigest`, `appVersions` | The site's OS image and application versions as last reported |
+
+**Thresholds** (defaults, configurable through the variables above):
+
+| State | Condition | Reason |
+|---|---|---|
+| `OFFLINE` | No status received for more than 90 s (exactly 90 s is still online) | `HEARTBEAT_STALE` only |
+| `DEGRADED` | Online, and buffer depth ≥ 200 | `BUFFER_DEPTH` |
+| `DEGRADED` | Online, and the oldest buffered row ≥ 300 s old | `BUFFER_AGE` |
+| `DEGRADED` | Online, and greenboot `RED` (`UNKNOWN` is not degraded) | `GREENBOOT_RED` |
+| `ONLINE` | Otherwise | none |
+
+A site appears only after its first status. Only the latest status is kept; a newer report always replaces it
+(the latest received wins, whatever its `reportedAt`). A decommissioned site stays listed, `OFFLINE`; remove its row
+by hand (`DELETE FROM site_status WHERE site_id = ...`, approved) if it should disappear.
+
+**Metrics** (`/q/metrics`, one series per site in `site_status`; the database is read every 10 s, ages are computed
+from the service clock at scrape time, so they keep growing while a site is silent):
+
+| Metric | Labels | Value |
+|---|---|---|
+| `asset_site_heartbeat_age_seconds` | `siteId` | Seconds since the latest status was received |
+| `asset_site_last_reading_age_seconds` | `siteId` | Seconds since `lastReadingAt`; `+Inf` when the site has no stored reading |
+| `asset_site_buffer_depth` | `siteId` | `bufferDepth` from the latest status |
+| `asset_site_state` | `siteId`, `state` (`ONLINE`, `DEGRADED`, `OFFLINE`) | `1` for the current state, else `0` |
+| `asset_consume_event_id_mismatch_total` | none | Readings whose `eventId` does not follow the contract's derivation (deduplication is unaffected) |
+
+All four site gauges read `NaN` while the database cannot be read.
+
+**Stale-site alert.** `Box1SiteStale` (PrometheusRule `asset-service-availability` in
+`box1-workloads-dev/workloads/asset-service/prometheusrule.yaml`) fires per `siteId` when both
+`asset_site_heartbeat_age_seconds` and `asset_site_last_reading_age_seconds` exceed 120 s for 1 minute, and clears
+when either resumes. With the 30 s scrape and 30 s evaluation intervals it fires 180 to 240 s after the site's last
+heartbeat (about 165 to 240 s after a NIC detach, given the 15 s heartbeat), and resolves within about 70 s of the
+next heartbeat (10 s gauge refresh, 30 s scrape, 30 s evaluation). The console shows the site `OFFLINE` from 90 s,
+before the alert. It does not fire for a site that has never reported a status (no series), while the database is
+unreadable (`NaN`), or while asset-service is not scraped (`Box1ServiceDown` covers that).
+
+**Readings from sites** are ordinary `equipment.reading.v1` records with `causationId` `ingest:site`. A replayed
+site backlog deduplicates on `(assetId, metricName, measuredAt)` before the threshold engine runs, so it stores no
+second copy and raises or re-counts no alert. `asset_consume_duplicates_total` counts the replayed records.
+
+**Generator guard.** Load and chaos runs only emit `site_load_NN`. A run that would emit a site in
+`ASSET_RESERVED_SITES` is refused at arm, preview and start with `422 RESERVED_SITE` (audited), and the ingestion
+pipeline rejects any load or chaos reading for such a site
+(`asset_ingest_rejected_total{reason="reserved_site"}`). API readings are not affected.
+
+**Troubleshooting.**
+
+- `403 SITE_MISMATCH` from a site: decode its token (without logging it) and check `azp`, the `siteId` claim and
+  `resource_access.asset-service.roles`; the path must use the claim's `siteId`.
+- `401` from a site: the client is not in `ASSET_SITE_CLIENTS`, the token lacks audience `asset-service`, or it is
+  expired.
+- A site stays `DEGRADED` with `BUFFER_DEPTH` or `BUFFER_AGE`: its forwarder cannot publish to Kafka; check the
+  site's connectivity and `asset_consumer_lag_records`.
+
 ## Backup and restore
 
 The PVC is marked so Argo CD never prunes or deletes it. To take a dump (keep it off Git):
@@ -170,5 +259,7 @@ the part worth keeping.
 ## Rollback
 
 Revert the promotion commit in `box1-workloads-dev` to restore the previous digest. The tables
-stay; V1 is forward-only, and earlier images do not use the database. To remove the service's
+stay; V1 and V2 are forward-only and additive, and earlier images ignore the V2 tables (Flyway's default ignores an
+applied migration that is newer than the image; not exercised). With an image before V2, site status writes answer
+refused (`401` or `403`) and the site metrics disappear, so `Box1SiteStale` cannot fire. To remove the service's
 data entirely, delete the PVC with approval; this is destructive.

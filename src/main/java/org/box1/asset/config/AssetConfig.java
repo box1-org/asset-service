@@ -32,9 +32,33 @@ public interface AssetConfig {
     @WithName("read-clients")
     Optional<List<String>> readClients();
 
+    /**
+     * Edge site clients (box1-docs#130). Their tokens keep only {@code site-reporter}, which allows nothing but writing
+     * the status of the site named in the token's {@code siteId} claim.
+     */
+    @WithName("site-clients")
+    Optional<List<String>> siteClients();
+
     @WithName("stale-after")
     @WithDefault("PT2M")
     Duration staleAfter();
+
+    /** Thresholds for a site's state, derived at read time (box1-ops-contracts SITE.md). */
+    Sites sites();
+
+    interface Sites {
+        /** No status received for longer than this: OFFLINE (HEARTBEAT_STALE). */
+        @WithDefault("PT90S")
+        Duration offlineAfter();
+
+        /** Online and buffer depth at least this: DEGRADED (BUFFER_DEPTH). */
+        @WithDefault("200")
+        long degradedBufferDepth();
+
+        /** Online and the oldest buffered row at least this old: DEGRADED (BUFFER_AGE). */
+        @WithDefault("PT5M")
+        Duration degradedBufferAge();
+    }
 
     interface Ingest {
         @WithDefault("100")
@@ -103,6 +127,10 @@ public interface AssetConfig {
 
         @WithDefault("PT20S")
         Duration staleHeartbeat();
+
+        /** Real edge sites the synthetic generator must never emit (box1-docs#128). */
+        @WithName("reserved-sites")
+        Optional<List<String>> reservedSites();
     }
 
     interface Chaos {

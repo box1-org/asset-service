@@ -16,6 +16,7 @@ and bounded, telemetry-only disruption.
 | [docs/architecture.md](docs/architecture.md) | Data flow, ownership, alert rules, the console's safety model |
 | [docs/runbook.md](docs/runbook.md) | First deployment, configuration, operations, recovery and replay |
 | [box1-ops-contracts TELEMETRY.md](https://github.com/box1-org/box1-ops-contracts/blob/main/TELEMETRY.md) | Event contract, keying and dead letters |
+| [box1-ops-contracts SITE.md](https://github.com/box1-org/box1-ops-contracts/blob/main/SITE.md) | Edge sites: readings, site status and state thresholds |
 
 Onboarded with PostgreSQL = `false`, Kafka = `true`. PostgreSQL was added afterwards without
 the template's inline Secret: the Secret is provisioned out of band (see the runbook). Kafka
@@ -29,11 +30,15 @@ topics are managed in `box1-gitops/platform/kafka/topics/`.
 | `POST /api/v1/telemetry/readings` | bearer token, client role `telemetry-writer` | Ingest one reading; `202` after Kafka acknowledges |
 | `GET /api/v1/assets/{assetId}/readings` | bearer token, role `telemetry-reader`, `telemetry-writer` or `chaos-operator` | Time window, keyset pagination, ordered by `measuredAt`, `metricName` |
 | `GET /api/v1/alerts` | as above | Alert episodes, newest first |
+| `PUT /api/v1/sites/{siteId}/status` | bearer token from an edge site's own client (`site-west`, `site-east`), client role `site-reporter`, claim `siteId` equal to the path | Site heartbeat ([box1-docs#130](https://github.com/box1-org/box1-docs/issues/130)); returns the stored `SiteStatus` |
+| `GET /api/v1/sites`, `GET /api/v1/sites/{siteId}` | bearer token, role `telemetry-reader`, `telemetry-writer` or `chaos-operator` | Each site's latest status with its `ONLINE`, `DEGRADED` or `OFFLINE` state derived at read time |
 | `/console/`, `/api/v1/control/*` | Keycloak login, client role `chaos-operator` | Load and chaos console |
 | `/api/greetings`, `/api/info`, `/q/*` | anonymous | Golden Path smoke contract, unchanged |
 
 Errors are `application/problem+json` with a stable `code`. Tokens come from realm `box1`;
-roles are read only from `resource_access.asset-service.roles`.
+roles are read only from `resource_access.asset-service.roles`. Site clients' tokens keep only
+`site-reporter`, so a site can write its own status and read nothing. The site status API, its
+thresholds, metrics and the `Box1SiteStale` alert are in the [runbook](docs/runbook.md#edge-site-status).
 
 ## Local development
 

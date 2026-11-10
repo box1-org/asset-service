@@ -66,6 +66,16 @@ public class TelemetryStore {
         update(sql, "touch last seen", assetId, siteId);
     }
 
+    /**
+     * Moves the site's latest reading time forward, never back (box1-docs#128), so a late or replayed older reading
+     * cannot make a silent site look fresh.
+     */
+    public void touchSiteLastReading(String siteId, Instant measuredAt) {
+        update("INSERT INTO site_last_reading (site_id, last_measured_at) VALUES (?, ?) ON CONFLICT (site_id)"
+                + " DO UPDATE SET last_measured_at = GREATEST(site_last_reading.last_measured_at, EXCLUDED.last_measured_at)",
+                "touch site last reading", siteId, measuredAt);
+    }
+
     /** Locks the pair's state row for this transaction. */
     public Optional<StoredState> lockState(String assetId, String metric) {
         String sql = "SELECT active, severity, breach_streak, clear_streak, last_measured_at FROM alert_state"

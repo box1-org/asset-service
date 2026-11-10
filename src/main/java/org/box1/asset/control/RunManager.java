@@ -130,6 +130,11 @@ public class RunManager {
     public RunRecord start(String actor, String runId, String confirmToken, String confirmNamespace) {
         RunRecord armed = runs.find(runId).orElseThrow(() -> new ControlException(404, "RUN_NOT_FOUND", "No run " + runId));
         RunConfig runConfig = parse(armed.config());
+        // Checked again at start: the reserved list may have changed since the run was armed.
+        List<String> reserved = runConfig.reservedSiteIds(reservedSites());
+        if (!reserved.isEmpty()) {
+            throw denied(actor, runId, 422, "RESERVED_SITE", "The generator never emits real edge sites; this run would emit " + reserved);
+        }
         long duration = runConfig.durationSeconds();
         long ttl = duration + config.control().ttlGrace().toSeconds();
         synchronized (lifecycle) {
@@ -379,11 +384,20 @@ public class RunManager {
         range(actor, "ratePerAsset", rate, 1, limits.maxRatePerAsset());
         range(actor, "durationSeconds", duration, 10, (int) limits.maxDuration().toSeconds());
         RunConfig runConfig = new RunConfig(request.kind(), sites, assets, List.copyOf(metrics), rate, duration);
+        List<String> reserved = runConfig.reservedSiteIds(reservedSites());
+        if (!reserved.isEmpty()) {
+            throw denied(actor, null, 422, "RESERVED_SITE", "The generator never emits real edge sites; this run would emit " + reserved);
+        }
         if (runConfig.baseRate() > limits.maxRunRatePerSecond()) {
             throw denied(actor, null, 422, "RATE_CAP", "sites x assetsPerSite x metrics x ratePerAsset = " + runConfig.baseRate()
                     + " readings/s; the cap is " + limits.maxRunRatePerSecond());
         }
         return runConfig;
+    }
+
+    /** Real edge sites (asset.control.reserved-sites) that no load or chaos run may emit. */
+    java.util.Set<String> reservedSites() {
+        return config.control().reservedSites().map(java.util.Set::copyOf).orElse(java.util.Set.of());
     }
 
     private static int orDefault(Integer value, int fallback) {

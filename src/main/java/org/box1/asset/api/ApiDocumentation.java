@@ -22,4 +22,29 @@ public final class ApiDocumentation {
     /** The 202 body. */
     public record Accepted(String eventId, @Schema(enumeration = "PUBLISHED") String status, String traceparent) {
     }
+
+    /** The edge site heartbeat body (box1-docs#130); the service parses the raw bytes itself (SiteReports). */
+    @Schema(name = "SiteStatusReport", requiredProperties = {"reportedAt", "bufferDepth", "siteEventBacklog", "bufferOldestAgeSeconds",
+        "readingsDropped", "greenbootStatus", "appVersions"}, additionalProperties = Schema.False.class)
+    public record SiteStatusReport(
+            @Schema(format = "date-time", description = "The site's clock when it sent the report", examples = "2026-11-10T12:00:00Z")
+            String reportedAt,
+            @Schema(minimum = "0", description = "Unpublished outbox rows (readings and site events)") long bufferDepth,
+            @Schema(minimum = "0", description = "Unpublished site events, which are never dropped") long siteEventBacklog,
+            @Schema(minimum = "0", description = "Age of the oldest unpublished row; 0 when empty") long bufferOldestAgeSeconds,
+            @Schema(minimum = "0", description = "Readings dropped by the buffer bound since the gateway started") long readingsDropped,
+            @Schema(pattern = "^sha256:[a-f0-9]{64}$", nullable = true,
+                description = "The OS image digest the site booted (bootc status), or null when unknown") String bootedImageDigest,
+            @Schema(pattern = "^sha256:[a-f0-9]{64}$", nullable = true, description = "An OS image staged for the next boot, if any")
+            String stagedImageDigest,
+            @Schema(pattern = "^sha256:[a-f0-9]{64}$", nullable = true, description = "The OS image bootc would roll back to, if any")
+            String rollbackImageDigest,
+            @Schema(enumeration = {"GREEN", "RED", "UNKNOWN"}, description = "Result of the boot's greenboot health checks")
+            String greenbootStatus,
+            @Schema(pattern = "^sha256:[a-f0-9]{64}$", nullable = true,
+                description = "The site-gateway bundle digest built into the booted image, or null when unknown") String bundleDigest,
+            @Schema(maxProperties = 8, additionalProperties = String.class,
+                description = "Application name (^[a-z][a-z0-9-]{0,31}$) to version (1 to 64 characters)")
+            java.util.Map<String, String> appVersions) {
+    }
 }

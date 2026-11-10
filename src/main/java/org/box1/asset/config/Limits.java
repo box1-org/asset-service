@@ -36,6 +36,9 @@ public final class Limits {
         requireDuration(control.ttlGrace(), MAX_TTL_GRACE, "asset.control.ttl-grace");
         requireDuration(config.chaos().maxPause(), MAX_PAUSE, "asset.chaos.max-pause");
         require(config.chaos().maxBurstMultiplier(), 1, MAX_BURST, "asset.chaos.max-burst-multiplier");
+        requireDuration(config.sites().offlineAfter(), Duration.ofHours(1), "asset.sites.offline-after");
+        require(config.sites().degradedBufferDepth(), 1, Long.MAX_VALUE, "asset.sites.degraded-buffer-depth");
+        requireDuration(config.sites().degradedBufferAge(), Duration.ofDays(1), "asset.sites.degraded-buffer-age");
         if (config.metrics().isEmpty() || config.metrics().size() > MAX_METRICS) {
             throw new IllegalStateException("asset.metrics must define 1 to " + MAX_METRICS + " metrics");
         }
