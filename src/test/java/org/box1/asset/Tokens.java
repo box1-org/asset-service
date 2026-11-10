@@ -38,6 +38,26 @@ public final class Tokens {
         return claims.jws().keyId("1").sign("privateKey.jwk");
     }
 
+    /**
+     * What Keycloak issues to an edge site's client (box1-docs#130): azp the client, aud asset-service, the client roles,
+     * and a hardcoded siteId claim (omitted when null).
+     */
+    public static String site(String azp, String siteId, String... roles) {
+        var claims = Jwt.preferredUserName("service-account-" + azp).subject("sa-" + azp).issuer("https://server.example.com")
+                .audience(java.util.Set.of("asset-service", azp)).claim("azp", azp)
+                .claim("resource_access", Map.of("asset-service", Map.of("roles", List.of(roles)))).expiresIn(300);
+        if (siteId != null) {
+            claims.claim("siteId", siteId);
+        }
+        return claims.jws().keyId("1").sign("privateKey.jwk");
+    }
+
+    /** A token issued to asset-service itself that also carries a siteId claim. */
+    public static String ownClientWithSite(String user, String siteId, String... roles) {
+        return base(user).claim("siteId", siteId).claim("resource_access", Map.of("asset-service", Map.of("roles", List.of(roles))))
+                .jws().keyId("1").sign("privateKey.jwk");
+    }
+
     public static String otherAudience(String user, String... roles) {
         return Jwt.preferredUserName(user).subject(user).issuer("https://server.example.com").audience("developer-hub")
                 .claim("resource_access", Map.of("asset-service", Map.of("roles", List.of(roles)))).expiresIn(300).jws().keyId("1")

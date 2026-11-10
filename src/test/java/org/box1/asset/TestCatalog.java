@@ -18,6 +18,11 @@ public final class TestCatalog {
     }
 
     public static AssetConfig config(boolean chaosEnabled, List<String> allowlist, String namespace) {
+        return config(chaosEnabled, allowlist, namespace, List.of("site_ds9", "site_spacedock"));
+    }
+
+    /** {@code reserved}: the edge sites the generator must never emit. */
+    public static AssetConfig config(boolean chaosEnabled, List<String> allowlist, String namespace, List<String> reserved) {
         Map<String, AssetConfig.MetricPolicy> metrics = Map.of(
                 "temperature", policy("C", List.of("F"), -50, 250, 80, 95, 75, 60),
                 "vibration", policy("mm/s", null, 0, 100, 7.1, 11.2, 6.0, 3.0),
@@ -25,6 +30,15 @@ public final class TestCatalog {
                 "power", policy("kW", null, 0, 5000, 400, 480, 380, 250));
         return new AssetConfig() {
             public java.util.Optional<java.util.List<String>> readClients() { return java.util.Optional.empty(); }
+            public java.util.Optional<java.util.List<String>> siteClients() { return java.util.Optional.of(List.of("site-west", "site-east")); }
+
+            public Sites sites() {
+                return new Sites() {
+                    public Duration offlineAfter() { return Duration.ofSeconds(90); }
+                    public long degradedBufferDepth() { return 200; }
+                    public Duration degradedBufferAge() { return Duration.ofMinutes(5); }
+                };
+            }
 
             public Ingest ingest() {
                 return new Ingest() {
@@ -59,6 +73,7 @@ public final class TestCatalog {
                     public int maxConcurrentRuns() { return 1; }
                     public Duration armLifetime() { return Duration.ofSeconds(60); }
                     public Duration staleHeartbeat() { return Duration.ofSeconds(20); }
+                    public Optional<List<String>> reservedSites() { return Optional.of(reserved); }
                 };
             }
 

@@ -14,5 +14,7 @@ public enum RejectReason {
     STALE_TIMESTAMP,
     OVERSIZE,
     RATE_LIMITED,
-    BACKPRESSURE
+    BACKPRESSURE,
+    /** A load or chaos reading for a real edge site (asset.control.reserved-sites); never from the API. */
+    RESERVED_SITE
 }

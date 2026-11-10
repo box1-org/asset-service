@@ -16,6 +16,7 @@ import org.box1.asset.domain.Reading;
 import org.box1.asset.domain.Threshold;
 import org.box1.asset.domain.ThresholdEngine;
 import org.box1.asset.ingest.Envelopes;
+import org.box1.asset.ingest.IngestionPipeline;
 import org.box1.asset.store.TelemetryStore;
 import org.jboss.logging.Logger;
 
@@ -58,6 +59,13 @@ public class ReadingProjector {
             registry.counter("asset.consume.skipped", "reason", "older_than_retention").increment();
             return Result.SKIPPED;
         }
+        if (!inbound.eventId().equals(IngestionPipeline.eventId(reading))) {
+            // Deduplication is on the natural key either way; this only shows a producer that ignores the contract's
+            // eventId derivation (box1-docs#128), whose eventIds would then disagree with the stored readings.
+            registry.counter("asset.consume.event.id.mismatch").increment();
+        }
+        // A duplicate (the natural key is already stored) returns here, before the threshold engine: a redelivered or
+        // replayed reading never re-evaluates, re-counts or re-activates an alert (box1-docs#128).
         if (!store.insertReading(reading, inbound.eventId(), inbound.traceparent())) {
             boolean conflict = store.storedValue(reading).map(v -> Double.compare(v, reading.value()) != 0).orElse(false);
             registry.counter("asset.consume.duplicates", "kind", conflict ? "different_value" : "same_value").increment();
@@ -68,6 +76,8 @@ public class ReadingProjector {
             return Result.DUPLICATE;
         }
         store.touchLastSeen(reading.assetId(), reading.siteId());
+        // Capped at this pod's clock, so a site clock running ahead cannot keep a silent site looking fresh.
+        store.touchSiteLastReading(reading.siteId(), reading.measuredAt().isAfter(now) ? now : reading.measuredAt());
         if (reading.measuredAt().isAfter(now.plus(maxFuture))) {
             // Never let a far-future timestamp move the evaluation watermark (review PERS-1, ARCH-1).
             registry.counter("asset.consume.not.evaluated", "reason", "future").increment();

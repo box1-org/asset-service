@@ -37,6 +37,7 @@ public class IngestionPipeline {
     private final Clock clock;
     private final int maxBody;
     private final ObjectMapper strict;
+    private final java.util.Set<String> reservedSites;
 
     public IngestionPipeline(ReadingValidator validator, ReadingPublisher publisher, AssetConfig config,
             MeterRegistry registry, Clock clock) {
@@ -50,6 +51,7 @@ public class IngestionPipeline {
         this.maxBody = config.ingest().maxBodyBytes();
         this.strict = new ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+        this.reservedSites = config.control().reservedSites().map(java.util.Set::copyOf).orElse(java.util.Set.of());
     }
 
     /** A raw JSON body, as the HTTP resource and the oversize chaos entry submit it. */
@@ -85,6 +87,11 @@ public class IngestionPipeline {
         } catch (RejectedReadingException rejected) {
             throw count(source, rejected);
         }
+        if (source != Source.API && reservedSites.contains(reading.siteId())) {
+            // Last line of the generator guard (box1-docs#128): load and chaos readings never claim a real edge site.
+            throw count(source, new RejectedReadingException(RejectReason.RESERVED_SITE,
+                    "Load and chaos runs never emit real edge site " + reading.siteId()));
+        }
         UUID eventId = eventId(reading);
         String traceparent = Envelopes.currentTraceparent();
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -110,9 +117,9 @@ public class IngestionPipeline {
     /**
      * The same reading always gets the same eventId, so a client retry after a 503 or a re-sent duplicate cannot look
      * like a new event to consumers that deduplicate on eventId (review MSG-4). Name-based (RFC 4122 v3) over the
-     * natural key, not for security.
+     * natural key, not for security. Every producer derives it the same way (box1-ops-contracts TELEMETRY.md).
      */
-    static UUID eventId(Reading reading) {
+    public static UUID eventId(Reading reading) {
         String key = "box1/equipment.reading.v1/" + reading.assetId() + "/" + reading.metricName() + "/" + reading.measuredAt();
         return UUID.nameUUIDFromBytes(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }

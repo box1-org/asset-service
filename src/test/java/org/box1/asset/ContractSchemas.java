@@ -26,6 +26,28 @@ public final class ContractSchemas {
         check(type, event.path("payload"), ref);
     }
 
+    /** The pinned contract's openapi/asset-service.yaml, as a tree. */
+    public static JsonNode openApi() throws Exception {
+        String ref = System.getProperty("contracts.ref");
+        if (ref == null || ref.isBlank()) {
+            throw new AssertionError("contracts.ref is not set");
+        }
+        try (InputStream in = URI.create("https://raw.githubusercontent.com/box1-org/box1-ops-contracts/" + ref + "/openapi/asset-service.yaml")
+                .toURL().openStream()) {
+            return new com.fasterxml.jackson.databind.ObjectMapper(new com.fasterxml.jackson.dataformat.yaml.YAMLFactory()).readTree(in);
+        }
+    }
+
+    /** A JSON Schema (2020-12) for one of the contract's components, its references resolved inside the document. */
+    public static JsonSchema component(JsonNode openApi, String name) {
+        com.fasterxml.jackson.databind.node.ObjectNode root = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        root.put("$schema", "https://json-schema.org/draft/2020-12/schema");
+        root.put("$ref", "#/components/schemas/" + name);
+        root.set("components", openApi.path("components"));
+        SchemaValidatorsConfig config = SchemaValidatorsConfig.builder().formatAssertionsEnabled(true).build();
+        return JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(root, config);
+    }
+
     private static void check(String name, JsonNode node, String ref) throws Exception {
         URI uri = URI.create("https://raw.githubusercontent.com/box1-org/box1-ops-contracts/" + ref + "/events/v1/" + name + ".schema.json");
         SchemaValidatorsConfig config = SchemaValidatorsConfig.builder().formatAssertionsEnabled(true).build();
